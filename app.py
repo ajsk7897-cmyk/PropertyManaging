@@ -945,15 +945,12 @@ with tab_market_research:
                 
         st.markdown("---")
         st.markdown("#### 📋 상세 데이터 테이블")
-        st.dataframe(
-            filtered_mdf.style.format({
-                "㎡당 임대료": "₩ {:,.0f}",
-                "평당 임대료": "₩ {:,.0f}",
-                "공실률(%)": "{:.1f}%"
-            }),
-            use_container_width=True,
-            hide_index=True
-        )
+        format_dict = {
+            "㎡당 임대료": "₩ {:,.0f}",
+            "평당 임대료": "₩ {:,.0f}",
+            "공실률(%)": "{:.1f}%"
+        }
+        display_styled_table(filtered_mdf, freeze_cols=1, format_dict=format_dict)
     else:
         st.info("검색 조건에 일치하는 데이터가 없습니다.")
 

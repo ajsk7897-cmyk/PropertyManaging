@@ -575,6 +575,7 @@ with st.sidebar:
 
 (
     tab_master_dashboard,
+    tab_market_research,
     tab_asset_view,
     tab_stacking_plan,
     tab_lease_info,
@@ -585,6 +586,7 @@ with st.sidebar:
 ) = st.tabs(
     [
         "🌐 마스터 대시보드",
+        "📈 시장 동향 리서치",
         "📊 자산별 면적 현황",
         "🏢 스태킹 플랜",
         "📝 자산별 임대정보",
@@ -611,8 +613,76 @@ def get_months_between(start_date, end_date):
     return months
 
 
+
+@st.cache_data(ttl=86400)
+def fetch_market_research_data():
+    import random
+    import pandas as pd
+    import requests
+    import streamlit as st
+    
+    # ---------------------------------------------------------
+    # [실제 API 연동부] 
+    # API 키는 .streamlit/secrets.toml의 R_ONE_API_KEY를 자동 참조합니다.
+    # 추후 실제 Endpoint URL과 파라미터 구조가 확정되면 아래 주석을 풀고 연동합니다.
+    # ---------------------------------------------------------
+    api_key = st.secrets.get("R_ONE_API_KEY", None)
+    api_endpoint = "https://api.reb.or.kr/v1/market/rent" # TODO: 실제 URL로 교체 필요
+    
+    if api_key and "TODO" not in api_endpoint:
+        try:
+            # 실제 연동 예시
+            # response = requests.get(api_endpoint, params={"serviceKey": api_key, "format": "json"}, timeout=3)
+            # response.raise_for_status()
+            # items = response.json().get("response", {}).get("body", {}).get("items", [])
+            # df = pd.DataFrame(items)
+            # df["평당 임대료"] = (df["㎡당 임대료"] * 3.3058).round().astype(int)
+            # return df
+            pass
+        except Exception as e:
+            st.warning(f"API 연동 오류 (더미 데이터로 대체합니다): {e}")
+            
+    # ---------------------------------------------------------
+    # API가 구성되지 않았거나 실패했을 때를 대비한 더미 데이터 생성 로직
+    # ---------------------------------------------------------
+    regions = ["서울", "경기", "인천", "부산", "대구", "광주", "대전"]
+    sub_regions = {
+        "서울": ["강남대로", "테헤란로", "도산대로", "여의도", "광화문", "명동", "홍대합정"],
+        "경기": ["분당", "판교", "일산", "평촌"],
+        "인천": ["부평", "구월", "송도"],
+        "부산": ["서면", "해운대", "광복동"],
+        "대구": ["동성로", "수성구"],
+        "광주": ["상무지구", "충장로"],
+        "대전": ["둔산", "은행동"]
+    }
+    asset_types = ["오피스", "소규모 상가", "중대형 상가"]
+    quarters = ["2023 1Q", "2023 2Q", "2023 3Q", "2023 4Q", "2024 1Q", "2024 2Q"]
+    
+    data = []
+    for r in regions:
+        for sr in sub_regions[r]:
+            for at in asset_types:
+                for q in quarters:
+                    base_rent = random.uniform(15000, 35000) if at == "오피스" else random.uniform(20000, 60000)
+                    if r == "서울":
+                        base_rent *= 1.5
+                    vacancy = random.uniform(2.0, 15.0)
+                    data.append({
+                        "지역명(시/도)": r,
+                        "세부 상권명": sr,
+                        "자산 유형": at,
+                        "기준 분기": q,
+                        "㎡당 임대료": round(base_rent),
+                        "공실률(%)": round(vacancy, 1)
+                    })
+    
+    df = pd.DataFrame(data)
+    df["평당 임대료"] = (df["㎡당 임대료"] * 3.3058).round().astype(int)
+    return df
+
 # ==========================================
 # Tab 0: 마스터 대시보드
+
 # ==========================================
 with tab_master_dashboard:
     st.header("🌐 마스터 대시보드 (Executive Summary)")
@@ -811,7 +881,84 @@ with tab_master_dashboard:
                 st.info("데이터 없음")
 
 
+
+# ==========================================
+# Tab 0.5: 시장 동향 리서치
+# ==========================================
+with tab_market_research:
+    st.header("📈 시장 동향 리서치 (한국부동산원 API 연동)")
+    st.markdown("한국부동산원 상업용부동산 임대동향조사 오픈 API를 연동하여 주요 상권의 임대료 및 공실률 추이를 분석합니다. *(현재는 UI 데모용 가상 데이터를 표출 중입니다)*")
+    
+    market_df = fetch_market_research_data()
+    
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        sel_regions = st.multiselect("📍 지역명(시/도)", options=market_df["지역명(시/도)"].unique(), default=["서울"])
+    with f2:
+        sel_types = st.multiselect("🏢 자산 유형", options=market_df["자산 유형"].unique(), default=["오피스"])
+    with f3:
+        latest_q = sorted(market_df["기준 분기"].unique())[-1]
+        sel_quarters = st.multiselect("📅 기준 분기", options=market_df["기준 분기"].unique(), default=[latest_q])
+        
+    filtered_mdf = market_df.copy()
+    if sel_regions:
+        filtered_mdf = filtered_mdf[filtered_mdf["지역명(시/도)"].isin(sel_regions)]
+    if sel_types:
+        filtered_mdf = filtered_mdf[filtered_mdf["자산 유형"].isin(sel_types)]
+    if sel_quarters:
+        filtered_mdf = filtered_mdf[filtered_mdf["기준 분기"].isin(sel_quarters)]
+        
+    st.markdown("---")
+    
+    if not filtered_mdf.empty:
+        agg_df = filtered_mdf.groupby("세부 상권명")[["평당 임대료", "공실률(%)"]].mean().reset_index()
+        agg_df = agg_df.sort_values(by="평당 임대료", ascending=False)
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            with st.container(border=True):
+                st.markdown("#### 상권별 평균 평당 임대료")
+                fig_rent = px.bar(agg_df, x="세부 상권명", y="평당 임대료")
+                fig_rent.update_traces(marker_color="#005EB8", texttemplate='₩ %{y:,.0f}', textposition='outside')
+                fig_rent.update_layout(
+                    margin=dict(l=0, r=0, t=30, b=0),
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    xaxis=dict(showgrid=False, zeroline=False, title=""),
+                    yaxis=dict(showgrid=True, gridcolor="#F1F5F9", zeroline=False)
+                )
+                st.plotly_chart(fig_rent, use_container_width=True)
+                
+        with c2:
+            with st.container(border=True):
+                st.markdown("#### 상권별 평균 공실률 (%)")
+                fig_vac = px.bar(agg_df, x="세부 상권명", y="공실률(%)")
+                fig_vac.update_traces(marker_color="#00A546", texttemplate='%{y:.1f}%', textposition='outside')
+                fig_vac.update_layout(
+                    margin=dict(l=0, r=0, t=30, b=0),
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    xaxis=dict(showgrid=False, zeroline=False, title=""),
+                    yaxis=dict(showgrid=True, gridcolor="#F1F5F9", zeroline=False)
+                )
+                st.plotly_chart(fig_vac, use_container_width=True)
+                
+        st.markdown("---")
+        st.markdown("#### 📋 상세 데이터 테이블")
+        st.dataframe(
+            filtered_mdf.style.format({
+                "㎡당 임대료": "₩ {:,.0f}",
+                "평당 임대료": "₩ {:,.0f}",
+                "공실률(%)": "{:.1f}%"
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info("검색 조건에 일치하는 데이터가 없습니다.")
+
 with tab_asset_view:
+
     st.header("자산별 면적 현황 조회")
 
     df_asset = fetch_data("SELECT * FROM Asset_Area")

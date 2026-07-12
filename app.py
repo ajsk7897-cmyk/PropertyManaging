@@ -172,6 +172,9 @@ st.markdown(
 
 # Helper function to send email with attachment
 def send_email_with_attachment(to_email, subject, body, file_bytes, file_name, mime_type):
+    if "email" not in st.secrets:
+        return False, "Streamlit Cloud의 [Settings] -> [Secrets] 에 [email] 계정 정보를 입력해주세요! (자세한 설정 방법은 안내를 참고하세요)"
+        
     try:
         user = st.secrets["email"]["user"]
         password = st.secrets["email"]["password"]
@@ -199,6 +202,7 @@ def send_email_with_attachment(to_email, subject, body, file_bytes, file_name, m
         return True, ""
     except Exception as e:
         return False, str(e)
+
 
 
 def calculate_escalated_amount(row, target_date):
@@ -1205,9 +1209,11 @@ with tab_asset_view:
         csv_dash = dashboard_df_conv.to_csv(index=False).encode("utf-8-sig")
         file_name_dash = f"asset_total_dashboard_{unit_option}.csv"
 
-        col_dash1, col_dash2, col_dash3 = st.columns([5, 3, 2])
+        col_dash1, col_dash2, col_dash3, col_dash4 = st.columns([4, 2, 3, 2], vertical_alignment="bottom")
         with col_dash1:
             st.markdown("### 📊 자산별 토탈 대시보드")
+            
+        with col_dash2:
             st.download_button(
                 "📊 토탈 CSV 다운로드",
                 data=csv_dash,
@@ -1216,10 +1222,10 @@ with tab_asset_view:
                 use_container_width=True,
             )
             
-        with col_dash2:
+        with col_dash3:
             to_email_dash = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key="email_tab1_dash")
             
-        with col_dash3:
+        with col_dash4:
             if st.button("🚀 메일 발송", key="btn_email_tab1_dash", use_container_width=True):
                 if to_email_dash:
                     success, err = send_email_with_attachment(
@@ -1295,9 +1301,11 @@ with tab_asset_view:
         csv = display_df_conv.to_csv(index=False).encode("utf-8-sig")
         file_name_1 = f"asset_area_status_{unit_option}.csv"
 
-        col_a1, col_a2, col_a3 = st.columns([5, 3, 2])
+        col_a1, col_a2, col_a3, col_a4 = st.columns([4, 2, 3, 2], vertical_alignment="bottom")
         with col_a1:
             st.markdown("### 🏢 자산별 층별 상세 현황")
+            
+        with col_a2:
             st.download_button(
                 "📊 현황 CSV 다운로드",
                 data=csv,
@@ -1306,10 +1314,10 @@ with tab_asset_view:
                 use_container_width=True,
             )
             
-        with col_a2:
+        with col_a3:
             to_email_1 = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key="email_tab1")
             
-        with col_a3:
+        with col_a4:
             if st.button("🚀 메일 발송", key="btn_email_tab1", use_container_width=True):
                 if to_email_1:
                     success, err = send_email_with_attachment(
@@ -1586,9 +1594,11 @@ with tab_lease_info:
         csv2 = df_display.to_csv(index=False).encode("utf-8-sig")
         file_name_2 = "lease_contracts.csv"
 
-        col_sum1, col_sum2, col_sum3 = st.columns([5, 3, 2])
+        col_sum1, col_sum2, col_sum3, col_sum4 = st.columns([4, 2, 3, 2], vertical_alignment="bottom")
         with col_sum1:
             st.markdown("### 📊 자산 통합 Summary")
+            
+        with col_sum2:
             st.download_button(
                 "📝 전체 통합 CSV 다운로드",
                 data=csv2,
@@ -1597,10 +1607,10 @@ with tab_lease_info:
                 use_container_width=True,
             )
             
-        with col_sum2:
+        with col_sum3:
             to_email_2 = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key="email_tab2")
             
-        with col_sum3:
+        with col_sum4:
             if st.button("🚀 메일 발송", key="btn_email_tab2", use_container_width=True):
                 if to_email_2:
                     success, err = send_email_with_attachment(
@@ -1614,7 +1624,7 @@ with tab_lease_info:
                     if success:
                         st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
                     else:
-                        st.error(f"메일 발 발송 실패: {err}")
+                        st.error(f"메일 발송 실패: {err}")
                 else:
                     st.warning("이메일 주소를 입력해주세요.")
         sum_krw_dep = df_krw["보증금"].sum() if not df_krw.empty else 0
@@ -1860,9 +1870,11 @@ with tab_rent_roll:
             csv_rr = df_rr.to_csv(index=False).encode("utf-8-sig")
             file_name_3 = f"rent_roll_{selected_year}_details.csv"
 
-            col_r1, col_r2, col_r3 = st.columns([5, 3, 2])
+            col_r1, col_r2, col_r3, col_r4 = st.columns([4, 2, 3, 2], vertical_alignment="bottom")
             with col_r1:
                 st.markdown(f"### {selected_year}년 렌트롤 상세 내역")
+                
+            with col_r2:
                 st.download_button(
                     "📥 통합 렌트롤 CSV 다운로드",
                     data=csv_rr,
@@ -1871,10 +1883,10 @@ with tab_rent_roll:
                     use_container_width=True,
                 )
                 
-            with col_r2:
-                to_email_3 = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key="email_tab3")
-                
             with col_r3:
+                to_email_3 = text_input_rr = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key="email_tab3")
+                
+            with col_r4:
                 if st.button("🚀 메일 발송", key="btn_email_tab3", use_container_width=True):
                     if to_email_3:
                         success, err = send_email_with_attachment(
@@ -3609,7 +3621,7 @@ with tab_history:
                             old_data, new_data, comps_data
                         )
                         
-                        col_dl1, col_dl2, col_dl3 = st.columns([5, 3, 2])
+                        col_dl0, col_dl1, col_dl2, col_dl3 = st.columns([4, 2, 3, 2], vertical_alignment="bottom")
                         with col_dl1:
                             st.download_button(
                                 "📥 선택한 이력 기안파일 다운로드",

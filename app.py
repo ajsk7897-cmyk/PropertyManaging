@@ -472,7 +472,7 @@ def get_engine():
     from sqlalchemy import create_engine
 
     return create_engine(
-        st.secrets["DATABASE_URL"], pool_size=5, max_overflow=2, pool_recycle=300
+        st.secrets["DATABASE_URL"], pool_size=5, max_overflow=2, pool_recycle=300, pool_pre_ping=True
     )
 
 
@@ -2639,21 +2639,24 @@ with tab_contract_update:
                     }
 
                     db_conn = engine.raw_connection()
-                    c = db_conn.cursor()
-                    c.execute(
-                        "SELECT floor, contract_area, deposit, monthly_rent, monthly_maintenance_fee FROM Lease_Contracts WHERE asset_name = %s AND status = 'ACTIVE' AND contract_id != %s",
-                        (asset_name, target_contract_id),
-                    )
-                    comps_data = [
-                        {
-                            "floor": r[0],
-                            "contract_area": r[1],
-                            "deposit": r[2],
-                            "monthly_rent": r[3],
-                            "monthly_maintenance_fee": r[4],
-                        }
-                        for r in c.fetchall()
-                    ]
+                    try:
+                        c = db_conn.cursor()
+                        c.execute(
+                            "SELECT floor, contract_area, deposit, monthly_rent, monthly_maintenance_fee FROM Lease_Contracts WHERE asset_name = %s AND status = 'ACTIVE' AND contract_id != %s",
+                            (asset_name, target_contract_id),
+                        )
+                        comps_data = [
+                            {
+                                "floor": r[0],
+                                "contract_area": r[1],
+                                "deposit": r[2],
+                                "monthly_rent": r[3],
+                                "monthly_maintenance_fee": r[4],
+                            }
+                            for r in c.fetchall()
+                        ]
+                    finally:
+                        db_conn.close()
 
                     file_bytes, filename = generate_renewal_proposal(
                         old_data, new_data, comps_data
@@ -3239,20 +3242,22 @@ with tab_history:
                 hist_id = int(sel_hist_str.split("]")[0][1:])
                 try:
                     db_conn = engine.raw_connection()
-                    c = db_conn.cursor()
-                    new_contract_id = int(
-                        c.execute(
-                            "SELECT contract_id FROM Contract_History WHERE history_id = %s",
+                    try:
+                        c = db_conn.cursor()
+                        new_contract_id = int(
+                            c.execute(
+                                "SELECT contract_id FROM Contract_History WHERE history_id = %s",
+                                (hist_id,),
+                            ).fetchone()[0]
+                        )
+                        details_str = c.execute(
+                            "SELECT details FROM Contract_History WHERE history_id = %s",
                             (hist_id,),
                         ).fetchone()[0]
-                    )
-                    details_str = c.execute(
-                        "SELECT details FROM Contract_History WHERE history_id = %s",
-                        (hist_id,),
-                    ).fetchone()[0]
-                    details_json = json.loads(details_str) if details_str else {}
-                    old_contract_id = details_json.get("이전계약ID")
-                    db_conn.close()
+                        details_json = json.loads(details_str) if details_str else {}
+                        old_contract_id = details_json.get("이전계약ID")
+                    finally:
+                        db_conn.close()
                     fetch_data.clear()
 
                     if old_contract_id:

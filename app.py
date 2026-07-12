@@ -27,17 +27,11 @@ st.markdown(
     
     html, body, .stApp {
         font-family: 'Pretendard', 'Inter', 'Noto Sans KR', sans-serif;
+        -webkit-font-smoothing: antialiased;
     }
     
-    /* 탭 디자인 조정 (폰트 줄바꿈 방지 및 폰트 크기 최적화) */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 2px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        padding-left: 10px;
-        padding-right: 10px;
-        font-size: 14px !important;
-        white-space: nowrap !important;
+    .block-container {
+        padding-top: 2rem !important;
     }
     
     .stApp {
@@ -60,30 +54,38 @@ st.markdown(
         margin-bottom: 2rem;
     }
     
+    /* Buttons */
     .stButton>button {
-        background: #005EB8;
-        color: white !important;
-        border: none;
-        border-radius: 8px;
-        padding: 0.5rem 1.5rem;
-        font-weight: 600;
-        box-shadow: 0 4px 6px -1px rgba(0, 94, 184, 0.3);
-        transition: all 0.3s ease;
+        background: #ffffff;
+        color: #334155 !important;
+        border: 1px solid #CBD5E1;
+        border-radius: 6px;
+        padding: 0.4rem 1rem;
+        font-weight: 500;
+        font-size: 0.9rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        transition: all 0.2s ease;
     }
     
     .stButton>button:hover {
-        transform: translateY(-2px);
-        background: #004a94;
-        box-shadow: 0 10px 15px -3px rgba(0, 94, 184, 0.4), 0 4px 6px -2px rgba(0, 94, 184, 0.2);
+        border-color: #005EB8;
+        color: #005EB8 !important;
+        background: #F8FAFC;
+    }
+
+    /* Cards and Containers */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        border: 1px solid #E2E8F0 !important;
+        border-radius: 8px !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
     }
     
     [data-testid="metric-container"] {
         background-color: #ffffff;
-        border: 1px solid #F1F5F9;
-        border-radius: 12px;
-        border-top: 4px solid #005EB8;
+        border: 1px solid #E2E8F0;
+        border-radius: 8px;
         padding: 1.2rem;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     [data-testid="stMetricValue"] > div {
         color: #005EB8 !important;
@@ -94,35 +96,56 @@ st.markdown(
     }
     
     .stAlert {
-        border-radius: 10px;
+        border-radius: 8px;
         border: none;
         background-color: #ffffff;
-        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
     }
     
+    /* Tabs */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 2rem;
-        background-color: white;
-        padding: 1rem 2rem 0;
-        border-radius: 12px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        gap: 0;
+        background-color: transparent;
+        padding: 0;
+        border-bottom: 1px solid #E2E8F0;
     }
     
     .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
+        height: 48px;
+        padding-left: 16px;
+        padding-right: 16px;
+        white-space: nowrap !important;
         background-color: transparent;
         border-radius: 0;
-        color: #64748b;
-        font-weight: 600;
-        font-size: 1.1rem;
-        border-bottom: 1px solid transparent;
+        color: #64748B;
+        font-weight: 500;
+        font-size: 14px !important;
+        border-bottom: 2px solid transparent;
         transition: all 0.3s ease;
     }
     
     .stTabs [aria-selected="true"] {
         color: #005EB8 !important;
-        border-bottom: 3px solid #005EB8 !important;
+        font-weight: 600;
+        border-bottom: 2px solid #005EB8 !important;
+    }
+
+    /* Forms & Inputs */
+    .stTextInput>div>div>input, 
+    .stNumberInput>div>div>input, 
+    .stSelectbox>div>div>div,
+    .stTextArea>div>div>textarea {
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 6px;
+        transition: all 0.3s ease;
+        box-shadow: none !important;
+    }
+    .stTextInput>div>div>input:focus, 
+    .stNumberInput>div>div>input:focus, 
+    .stSelectbox>div>div>div:focus,
+    .stTextArea>div>div>textarea:focus {
+        border-color: #005EB8 !important;
+        box-shadow: 0 0 0 1px #005EB8 !important;
     }
 
 .custom-st-table th:nth-child(1), .custom-st-table td:nth-child(1) {{
@@ -131,12 +154,12 @@ st.markdown(
     left: 0;
     z-index: 5;
     background-color: white;
-    border-right: 1px solid #e2e8f0 !important;
+    border-right: none !important;
 }}
 .custom-st-table th:nth-child(1) {
     z-index: 15;
     background-color: #F8FAFC !important;
-    color: #0F172A !important;
+    color: #334155 !important;
 }
 .custom-st-table tr:hover td:nth-child(1) {
     background-color: #f8fafc;
@@ -145,6 +168,37 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
+
+# Helper function to send email with attachment
+def send_email_with_attachment(to_email, subject, body, file_bytes, file_name, mime_type):
+    try:
+        user = st.secrets["email"]["user"]
+        password = st.secrets["email"]["password"]
+        host = st.secrets.get("email", {}).get("host", "smtp.gmail.com")
+        port = st.secrets.get("email", {}).get("port", 465)
+        
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = user
+        msg["To"] = to_email
+        msg.set_content(body)
+        
+        maintype, subtype = mime_type.split("/", 1)
+        msg.add_attachment(file_bytes, maintype=maintype, subtype=subtype, filename=file_name)
+        
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port) as server:
+                server.login(user, password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port) as server:
+                server.starttls()
+                server.login(user, password)
+                server.send_message(msg)
+        return True, ""
+    except Exception as e:
+        return False, str(e)
 
 
 def calculate_escalated_amount(row, target_date):
@@ -290,24 +344,24 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css=""):
 
     if freeze_cols == 4:
         freeze_css = f"""
-        .{uid} th:nth-child(1), .{uid} td:nth-child(1) {{ position: -webkit-sticky; position: sticky; left: 0; z-index: 5; min-width: 120px; max-width: 120px; }}
-        .{uid} th:nth-child(2), .{uid} td:nth-child(2) {{ position: -webkit-sticky; position: sticky; left: 120px; z-index: 5; min-width: 80px; max-width: 80px; }}
-        .{uid} th:nth-child(3), .{uid} td:nth-child(3) {{ position: -webkit-sticky; position: sticky; left: 200px; z-index: 5; min-width: 150px; max-width: 150px; }}
-        .{uid} th:nth-child(4), .{uid} td:nth-child(4) {{ position: -webkit-sticky; position: sticky; left: 350px; z-index: 5; min-width: 60px; max-width: 60px; border-right: 2px solid #cbd5e1 !important; }}
+        .{uid} th:nth-child(1), .{uid} td:nth-child(1) {{ position: -webkit-sticky; position: sticky; left: 0; z-index: 5; min-width: 120px; max-width: 120px; border-right: none !important; }}
+        .{uid} th:nth-child(2), .{uid} td:nth-child(2) {{ position: -webkit-sticky; position: sticky; left: 120px; z-index: 5; min-width: 80px; max-width: 80px; border-right: none !important; }}
+        .{uid} th:nth-child(3), .{uid} td:nth-child(3) {{ position: -webkit-sticky; position: sticky; left: 200px; z-index: 5; min-width: 150px; max-width: 150px; border-right: none !important; }}
+        .{uid} th:nth-child(4), .{uid} td:nth-child(4) {{ position: -webkit-sticky; position: sticky; left: 350px; z-index: 5; min-width: 60px; max-width: 60px; border-right: none !important; }}
 
-        .{uid} th:nth-child(-n+4) {{ z-index: 15; background-color: #F8FAFC !important; color: #0F172A !important; }}
+        .{uid} th:nth-child(-n+4) {{ z-index: 15; background-color: #F8FAFC !important; color: #334155 !important; font-weight: 600 !important; }}
         """
     else:
         freeze_css = f"""
-        .{uid} th:nth-child(1), .{uid} td:nth-child(1) {{ position: -webkit-sticky; position: sticky; left: 0; z-index: 5; border-right: 1px solid #F1F5F9 !important; }}
-        .{uid} th:nth-child(1) {{ z-index: 15; background-color: #F8FAFC !important; color: #0F172A !important; }}
+        .{uid} th:nth-child(1), .{uid} td:nth-child(1) {{ position: -webkit-sticky; position: sticky; left: 0; z-index: 5; border-right: none !important; }}
+        .{uid} th:nth-child(1) {{ z-index: 15; background-color: #F8FAFC !important; color: #334155 !important; font-weight: 600 !important; }}
         """
 
     wrapper = f"""
 <html>
 <head>
 <style>
-body {{ margin: 0; font-family: "Source Sans Pro", sans-serif; }}
+body {{ margin: 0; font-family: 'Pretendard', 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }}
 .custom-st-table.{uid} {{
     width: 100%;
     max-width: 100%;
@@ -316,6 +370,7 @@ body {{ margin: 0; font-family: "Source Sans Pro", sans-serif; }}
     overflow-y: auto;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }}
 .custom-st-table.{uid} table {{
     width: 100%;
@@ -326,11 +381,12 @@ body {{ margin: 0; font-family: "Source Sans Pro", sans-serif; }}
 }}
 .custom-st-table.{uid} th {{
     background-color: #F8FAFC !important;
-    color: #0F172A !important;
-    font-weight: 700 !important;
+    color: #334155 !important;
+    font-weight: 600 !important;
     text-align: center !important;
     padding: 0.75rem 1rem !important;
-    border-bottom: 2px solid #CBD5E1 !important;
+    border-bottom: 1px solid #F1F5F9 !important;
+    border-right: none !important;
     position: -webkit-sticky;
     position: sticky;
     top: 0;
@@ -338,25 +394,28 @@ body {{ margin: 0; font-family: "Source Sans Pro", sans-serif; }}
 }}
 .custom-st-table.{uid} td {{
     padding: 0.75rem 1rem !important;
-    text-align: center !important;
+    text-align: right !important;
     border-bottom: 1px solid #F1F5F9 !important;
-    border-right: 1px solid #F1F5F9 !important;
+    border-right: none !important;
     color: #334155;
 }}
+.custom-st-table.{uid} td:first-child {{
+    text-align: left !important;
+}}
 .custom-st-table.{uid} th {{
-    border-right: 1px dotted #cbd5e1;
+    /* Removed vertical lines */
 }}
 .custom-st-table.{uid} td:last-child, .custom-st-table.{uid} th:last-child {{
     border-right: none;
 }}
 .custom-st-table.{uid} tr:nth-child(even) td {{
-    background-color: #f1f5f9;
+    background-color: #ffffff;
 }}
 .custom-st-table.{uid} tr:nth-child(odd) td {{
-    background-color: white;
+    background-color: #ffffff;
 }}
 .custom-st-table.{uid} tr:hover td {{
-    background-color: #e2e8f0;
+    background-color: #F8FAFC !important;
 }}
 {freeze_css}
 {custom_css.replace('{uid}', uid)}
@@ -1143,7 +1202,41 @@ with tab_asset_view:
             for col in area_cols:
                 dashboard_df_conv[col] = (dashboard_df_conv[col] * 35.58).round(2)
 
-        st.markdown("### 📊 자산별 토탈 대시보드")
+        csv_dash = dashboard_df_conv.to_csv(index=False).encode("utf-8-sig")
+        file_name_dash = f"asset_total_dashboard_{unit_option}.csv"
+
+        col_dash1, col_dash2, col_dash3 = st.columns([5, 3, 2])
+        with col_dash1:
+            st.markdown("### 📊 자산별 토탈 대시보드")
+            st.download_button(
+                "📊 토탈 CSV 다운로드",
+                data=csv_dash,
+                file_name=file_name_dash,
+                mime="text/csv",
+                use_container_width=True,
+            )
+            
+        with col_dash2:
+            to_email_dash = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key="email_tab1_dash")
+            
+        with col_dash3:
+            if st.button("🚀 메일 발송", key="btn_email_tab1_dash", use_container_width=True):
+                if to_email_dash:
+                    success, err = send_email_with_attachment(
+                        to_email=to_email_dash,
+                        subject="[PM/AM] 자산별 토탈 대시보드 리포트",
+                        body="요청하신 자산별 토탈 대시보드 리포트 파일을 첨부하여 보내드립니다.",
+                        file_bytes=csv_dash,
+                        file_name=file_name_dash,
+                        mime_type="text/csv"
+                    )
+                    if success:
+                        st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
+                    else:
+                        st.error(f"메일 발송 실패: {err}")
+                else:
+                    st.warning("이메일 주소를 입력해주세요.")
+
         display_styled_table(
             center_styler(dashboard_df_conv).format(
                 {c: "{:,.2f}" for c in area_cols + ["임대율 (%)"]}
@@ -1199,18 +1292,40 @@ with tab_asset_view:
             for col in area_cols:
                 display_df_conv[col] = (display_df_conv[col] * 35.58).round(2)
 
-        col_a1, col_a2 = st.columns([8, 2])
+        csv = display_df_conv.to_csv(index=False).encode("utf-8-sig")
+        file_name_1 = f"asset_area_status_{unit_option}.csv"
+
+        col_a1, col_a2, col_a3 = st.columns([5, 3, 2])
         with col_a1:
             st.markdown("### 🏢 자산별 층별 상세 현황")
-        with col_a2:
-            csv = display_df_conv.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
                 "📊 현황 CSV 다운로드",
                 data=csv,
-                file_name=f"asset_area_status_{unit_option}.csv",
+                file_name=file_name_1,
                 mime="text/csv",
                 use_container_width=True,
             )
+            
+        with col_a2:
+            to_email_1 = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key="email_tab1")
+            
+        with col_a3:
+            if st.button("🚀 메일 발송", key="btn_email_tab1", use_container_width=True):
+                if to_email_1:
+                    success, err = send_email_with_attachment(
+                        to_email=to_email_1,
+                        subject="[PM/AM] 자산별 면적 현황 리포트",
+                        body="요청하신 자산별 면적 현황 리포트 파일을 첨부하여 보내드립니다.",
+                        file_bytes=csv,
+                        file_name=file_name_1,
+                        mime_type="text/csv"
+                    )
+                    if success:
+                        st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
+                    else:
+                        st.error(f"메일 발송 실패: {err}")
+                else:
+                    st.warning("이메일 주소를 입력해주세요.")
 
         display_styled_table(
             center_styler(display_df_conv).format(
@@ -1468,18 +1583,40 @@ with tab_lease_info:
         df_krw = df_display[df_display["통화"] == "KRW"].copy()
         df_usd = df_display[df_display["통화"] == "USD"].copy()
 
-        col_sum1, col_sum2 = st.columns([8, 2])
+        csv2 = df_display.to_csv(index=False).encode("utf-8-sig")
+        file_name_2 = "lease_contracts.csv"
+
+        col_sum1, col_sum2, col_sum3 = st.columns([5, 3, 2])
         with col_sum1:
             st.markdown("### 📊 자산 통합 Summary")
-        with col_sum2:
-            csv2 = df_display.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
                 "📝 전체 통합 CSV 다운로드",
                 data=csv2,
-                file_name="lease_contracts.csv",
+                file_name=file_name_2,
                 mime="text/csv",
                 use_container_width=True,
             )
+            
+        with col_sum2:
+            to_email_2 = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key="email_tab2")
+            
+        with col_sum3:
+            if st.button("🚀 메일 발송", key="btn_email_tab2", use_container_width=True):
+                if to_email_2:
+                    success, err = send_email_with_attachment(
+                        to_email=to_email_2,
+                        subject="[PM/AM] 통합 임대정보 리포트",
+                        body="요청하신 통합 임대정보 리포트 파일을 첨부하여 보내드립니다.",
+                        file_bytes=csv2,
+                        file_name=file_name_2,
+                        mime_type="text/csv"
+                    )
+                    if success:
+                        st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
+                    else:
+                        st.error(f"메일 발 발송 실패: {err}")
+                else:
+                    st.warning("이메일 주소를 입력해주세요.")
         sum_krw_dep = df_krw["보증금"].sum() if not df_krw.empty else 0
         sum_krw_rent = df_krw["임대료"].sum() if not df_krw.empty else 0
         sum_krw_maint = df_krw["관리비"].sum() if not df_krw.empty else 0
@@ -1720,18 +1857,40 @@ with tab_rent_roll:
             df_rr_krw = df_rr[df_rr["통화"] == "KRW"].copy()
             df_rr_usd = df_rr[df_rr["통화"] == "USD"].copy()
 
-            col_r1, col_r2 = st.columns([8, 2])
+            csv_rr = df_rr.to_csv(index=False).encode("utf-8-sig")
+            file_name_3 = f"rent_roll_{selected_year}_details.csv"
+
+            col_r1, col_r2, col_r3 = st.columns([5, 3, 2])
             with col_r1:
                 st.markdown(f"### {selected_year}년 렌트롤 상세 내역")
-            with col_r2:
-                csv_rr = df_rr.to_csv(index=False).encode("utf-8-sig")
                 st.download_button(
                     "📥 통합 렌트롤 CSV 다운로드",
                     data=csv_rr,
-                    file_name=f"rent_roll_{selected_year}_details.csv",
+                    file_name=file_name_3,
                     mime="text/csv",
                     use_container_width=True,
                 )
+                
+            with col_r2:
+                to_email_3 = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key="email_tab3")
+                
+            with col_r3:
+                if st.button("🚀 메일 발송", key="btn_email_tab3", use_container_width=True):
+                    if to_email_3:
+                        success, err = send_email_with_attachment(
+                            to_email=to_email_3,
+                            subject=f"[PM/AM] {selected_year}년 렌트롤 리포트",
+                            body=f"요청하신 {selected_year}년 렌트롤 상세 내역을 첨부하여 보내드립니다.",
+                            file_bytes=csv_rr,
+                            file_name=file_name_3,
+                            mime_type="text/csv"
+                        )
+                        if success:
+                            st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
+                        else:
+                            st.error(f"메일 발송 실패: {err}")
+                    else:
+                        st.warning("이메일 주소를 입력해주세요.")
 
             view_mode = st.radio(
                 "보기 모드 선택",
@@ -3449,12 +3608,38 @@ with tab_history:
                         file_bytes, filename = generate_renewal_proposal(
                             old_data, new_data, comps_data
                         )
-                        st.download_button(
-                            "📥 선택한 이력 기안파일 다운로드",
-                            data=file_bytes,
-                            file_name=filename,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        )
+                        
+                        col_dl1, col_dl2, col_dl3 = st.columns([5, 3, 2])
+                        with col_dl1:
+                            st.download_button(
+                                "📥 선택한 이력 기안파일 다운로드",
+                                data=file_bytes,
+                                file_name=filename,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                            )
+                            
+                        with col_dl2:
+                            to_email_6 = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key=f"email_tab6_{hist_id}")
+                            
+                        with col_dl3:
+                            if st.button("🚀 메일 발송", key=f"btn_email_tab6_{hist_id}", use_container_width=True):
+                                if to_email_6:
+                                    company_name = new_data.get('임차인명', '업체')
+                                    success, err = send_email_with_attachment(
+                                        to_email=to_email_6,
+                                        subject=f"[PM/AM] {company_name} 갱신 기안서류",
+                                        body=f"요청하신 {company_name}의 갱신 기안서류(Excel)를 첨부하여 보내드립니다.",
+                                        file_bytes=file_bytes,
+                                        file_name=filename,
+                                        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    )
+                                    if success:
+                                        st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
+                                    else:
+                                        st.error(f"메일 발송 실패: {err}")
+                                else:
+                                    st.warning("이메일 주소를 입력해주세요.")
                     else:
                         st.warning(
                             "선택하신 이력에는 이전 계약 정보가 포함되어 있지 않습니다."

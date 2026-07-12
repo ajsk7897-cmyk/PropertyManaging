@@ -840,9 +840,9 @@ with tab_master_dashboard:
         with st.container(border=True):
             st.markdown("#### 자산별 평균 평단가 비교 (임대료 및 관리비)")
             if not active_leases.empty:
-                valid_leases = active_leases[active_leases["contract_area"] > 0].copy()
-                valid_leases["rent_unit"] = valid_leases["rent_krw"] / valid_leases["contract_area"]
-                valid_leases["maint_unit"] = valid_leases["maint_krw"] / valid_leases["contract_area"]
+                valid_leases = active_leases[active_leases["contract_area"].astype(float) > 0].copy()
+                valid_leases["rent_unit"] = valid_leases["rent_krw"] / valid_leases["contract_area"].astype(float)
+                valid_leases["maint_unit"] = valid_leases["maint_krw"] / valid_leases["contract_area"].astype(float)
                 df_unit = valid_leases.groupby("asset_name")[["rent_unit", "maint_unit"]].mean().reset_index()
                 
                 df_unit["total_unit"] = df_unit["rent_unit"] + df_unit["maint_unit"]
@@ -1403,15 +1403,15 @@ with tab_lease_info:
 
         df_contracts["deposit_per_pyeong"] = (
             df_contracts["deposit"]
-            / df_contracts["contract_area"].replace(0, float("nan"))
+            / df_contracts["contract_area"].astype(float).replace(0, float("nan"))
         ).fillna(0)
         df_contracts["rent_per_pyeong"] = (
             df_contracts["monthly_rent"]
-            / df_contracts["contract_area"].replace(0, float("nan"))
+            / df_contracts["contract_area"].astype(float).replace(0, float("nan"))
         ).fillna(0)
         df_contracts["maintenance_per_pyeong"] = (
             df_contracts["monthly_maintenance_fee"]
-            / df_contracts["contract_area"].replace(0, float("nan"))
+            / df_contracts["contract_area"].astype(float).replace(0, float("nan"))
         ).fillna(0)
 
         display_cols = [

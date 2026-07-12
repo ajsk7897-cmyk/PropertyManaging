@@ -439,14 +439,16 @@ def init_db():
             conn.rollback()
             pass  # Column already exists
 
+    c.execute("DROP TABLE IF EXISTS RentRoll_Overrides")
     c.execute("""
         CREATE TABLE IF NOT EXISTS RentRoll_Overrides (
             contract_id INTEGER,
+            floor TEXT,
             year INTEGER,
             month INTEGER,
             over_rent REAL,
             over_maint REAL,
-            PRIMARY KEY (contract_id, year, month)
+            PRIMARY KEY (contract_id, floor, year, month)
         )
     """)
 
@@ -1597,7 +1599,7 @@ with tab_rent_roll:
         )
         overrides_dict = {}
         for _, ov in df_overrides.iterrows():
-            overrides_dict[(ov["contract_id"], ov["month"])] = (
+            overrides_dict[(ov["contract_id"], ov["floor"], ov["month"])] = (
                 ov["over_rent"],
                 ov["over_maint"],
             )
@@ -1669,12 +1671,6 @@ with tab_rent_roll:
                     overlap_start = max(start, curr_month_start)
                     overlap_end = min(end, curr_month_end)
 
-                    # Overrides check
-                    if (row["contract_id"], month) in overrides_dict:
-                        o_rent, o_maint = overrides_dict[(row["contract_id"], month)]
-                        rent_rounded = o_rent
-                        maint_rounded = o_maint
-
                     is_rf = month_str in rf_details
                     actual_rent_total = 0 if is_rf else rent_rounded
                     actual_maint_total = maint_rounded
@@ -1697,9 +1693,14 @@ with tab_rent_roll:
 
                     # 3. Distribute by floor
                     for fl, info in floors_info.items():
-                        ratio = info.get("ratio", 1.0)
-                        floor_rent = rent_to_charge_total * ratio
-                        floor_maint = maint_to_charge_total * ratio
+                        if (row["contract_id"], fl, month) in overrides_dict:
+                            o_rent, o_maint = overrides_dict[(row["contract_id"], fl, month)]
+                            floor_rent = o_rent
+                            floor_maint = o_maint
+                        else:
+                            ratio = info.get("ratio", 1.0)
+                            floor_rent = rent_to_charge_total * ratio
+                            floor_maint = maint_to_charge_total * ratio
 
                         floor_records[fl][f"{month}월 임대료"] = round(floor_rent)
                         floor_records[fl][f"{month}월 관리비"] = round(floor_maint)
@@ -1898,17 +1899,19 @@ with tab_rent_roll:
                                     new_maint
                                 ) != str(old_maint):
                                     cid = int(df_edited.loc[idx, "Contract_ID"])
-                                    val_rent = float(str(new_rent).replace(",", ""))
-                                    val_maint = float(str(new_maint).replace(",", ""))
+                                    fl = str(df_edited.loc[idx, "층"])
+                                    val_rent = float(str(new_rent).replace(",", "").replace("₩", "").replace("USD", "").replace(" ", ""))
+                                    val_maint = float(str(new_maint).replace(",", "").replace("₩", "").replace("USD", "").replace(" ", ""))
                                     c.execute(
                                         """
-                                        INSERT INTO RentRoll_Overrides (contract_id, year, month, over_rent, over_maint)
-                                        VALUES (%s, %s, %s, %s, %s)
-                                        ON CONFLICT(contract_id, year, month)
+                                        INSERT INTO RentRoll_Overrides (contract_id, floor, year, month, over_rent, over_maint)
+                                        VALUES (%s, %s, %s, %s, %s, %s)
+                                        ON CONFLICT(contract_id, floor, year, month)
                                         DO UPDATE SET over_rent=excluded.over_rent, over_maint=excluded.over_maint
                                     """,
                                         (
                                             cid,
+                                            fl,
                                             selected_year,
                                             month,
                                             val_rent,
@@ -2057,21 +2060,53 @@ with tab_asset_update:
             st.error(f"업로드 중 오류 발생: {e}")
 
     st.markdown("---")
-    st.markdown("### 2. 수동 개별 등록")
+    st.markdown("### 2. 자산 등록 및 수정")
+    asset_update_mode = st.radio("작업 선택", ["✨ 신규 자산 등록", "📝 기존 자산 수정"], horizontal=True)
+
+    sel_asset = ""
+    sel_floor = ""
+    default_exc = 0.0
+    default_com = 0.0
+    default_tot = 0.0
+    default_bank = 0.0
+
+    if asset_update_mode == "📝 기존 자산 수정":
+        df_assets = fetch_data("SELECT * FROM Asset_Area")
+        if df_assets.empty:
+            st.warning("등록된 자산이 없습니다.")
+        else:
+            assets_list = df_assets["asset_name"].unique().tolist()
+            sel_asset = st.selectbox("수정할 자산명 선택", assets_list)
+            
+            floors_list = df_assets[df_assets["asset_name"] == sel_asset]["floor"].unique().tolist()
+            sel_floor = st.selectbox("수정할 층 선택", floors_list)
+            
+            if sel_asset and sel_floor:
+                row = df_assets[(df_assets["asset_name"] == sel_asset) & (df_assets["floor"] == sel_floor)].iloc[0]
+                default_exc = float(row.get("exclusive_area", 0.0))
+                default_com = float(row.get("common_area", 0.0))
+                default_tot = float(row.get("total_area", 0.0))
+                default_bank = float(row.get("bank_area", 0.0))
+
     with st.form("asset_manual_form"):
         col_m1, col_m2 = st.columns(2)
         with col_m1:
-            m_asset_name = st.text_input("자산명 (건물명)")
-            m_floor = st.text_input("층수 (예: 1F, B1)")
+            if asset_update_mode == "✨ 신규 자산 등록":
+                m_asset_name = st.text_input("자산명 (건물명)")
+                m_floor = st.text_input("층수 (예: 1F, B1)")
+            else:
+                m_asset_name = st.text_input("자산명 (건물명)", value=sel_asset, disabled=True)
+                m_floor = st.text_input("층수 (예: 1F, B1)", value=sel_floor, disabled=True)
+                
         with col_m2:
-            m_exclusive = st.number_input("전용 면적 (평)", min_value=0.0, step=1.0)
-            m_common = st.number_input("공용 면적 (평)", min_value=0.0, step=1.0)
-            m_total = st.number_input("총 면적 (평)", min_value=0.0, step=1.0)
+            m_exclusive = st.number_input("전용 면적 (평)", min_value=0.0, step=1.0, value=default_exc)
+            m_common = st.number_input("공용 면적 (평)", min_value=0.0, step=1.0, value=default_com)
+            m_total = st.number_input("총 면적 (평)", min_value=0.0, step=1.0, value=default_tot)
             m_bank = st.number_input(
-                "은행 및 지점 사용 면적 (평)", min_value=0.0, step=1.0
+                "은행 및 지점 사용 면적 (평)", min_value=0.0, step=1.0, value=default_bank
             )
 
-        submitted = st.form_submit_button("✅ 자산 정보 개별 저장")
+        submitted = st.form_submit_button("✅ 자산 정보 저장")
         if submitted:
             if m_asset_name and m_floor:
                 try:
@@ -2157,6 +2192,7 @@ with tab_contract_update:
         [
             "✨ 신규 계약",
             "🔄 계약 갱신",
+            "📝 기존 계약 수정",
             "❌ 퇴점",
             "🗑️ 계약 완전 삭제",
             "📥 일괄 등록 (CSV/Excel)",
@@ -2186,7 +2222,7 @@ with tab_contract_update:
     # ------------------
     # 1) 갱신/퇴점/삭제 모드일 경우 기존 계약 선택
     # ------------------
-    if update_mode in ["🔄 계약 갱신", "❌ 퇴점", "🗑️ 계약 완전 삭제"]:
+    if update_mode in ["🔄 계약 갱신", "📝 기존 계약 수정", "❌ 퇴점", "🗑️ 계약 완전 삭제"]:
         if update_mode == "🗑️ 계약 완전 삭제":
             df_for_selection = fetch_data("SELECT * FROM Lease_Contracts")
             warning_msg = "등록된 계약이 없습니다."
@@ -2349,7 +2385,7 @@ with tab_contract_update:
     # ------------------
     # 4) 신규/갱신 폼 렌더링
     # ------------------
-    elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신"]:
+    elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계약 수정"]:
         default_vals = {
             "asset_name": asset_list[0],
             "floor": "",
@@ -2363,9 +2399,10 @@ with tab_contract_update:
             "rent": 0,
             "maint": 0,
             "rf_details": [],
+            "floor_details": {}
         }
 
-        if update_mode == "🔄 계약 갱신":
+        if update_mode in ["🔄 계약 갱신", "📝 기존 계약 수정"]:
             default_vals["asset_name"] = row_sel["asset_name"]
             default_vals["floor"] = row_sel["floor"]
             default_vals["company"] = row_sel["company_name"]
@@ -2375,17 +2412,38 @@ with tab_contract_update:
                 else 0.0
             )
             default_vals["exclusive_area"] = (
-                float(row_sel["contract_exclusive_area"])
-                if "contract_exclusive_area" in row_sel
-                and pd.notnull(row_sel["contract_exclusive_area"])
+                float(row_sel.get("contract_exclusive_area", 0.0))
+                if pd.notnull(row_sel.get("contract_exclusive_area", 0.0))
                 else 0.0
             )
-            # 갱신일 경우 시작일을 기존 종료일 다음날 정도로 맞춰주는 편의 제공, 사용자가 바꿀 수 있음
+            
+            old_start = pd.to_datetime(row_sel["start_date"]).date()
             old_end = pd.to_datetime(row_sel["end_date"]).date()
-            default_vals["s_date"] = old_end + timedelta(days=1)
-            default_vals["e_date"] = default_vals["s_date"].replace(
-                year=default_vals["s_date"].year + 2
-            )
+            
+            if update_mode == "🔄 계약 갱신":
+                default_vals["s_date"] = old_end + timedelta(days=1)
+                default_vals["e_date"] = default_vals["s_date"].replace(
+                    year=default_vals["s_date"].year + 2
+                )
+            else: # 📝 기존 계약 수정
+                if "contract_date" in row_sel and pd.notnull(row_sel["contract_date"]):
+                    default_vals["c_date"] = pd.to_datetime(row_sel["contract_date"]).date()
+                else:
+                    default_vals["c_date"] = old_start
+                default_vals["s_date"] = old_start
+                default_vals["e_date"] = old_end
+                
+                if row_sel.get("rent_free_details"):
+                    try:
+                        default_vals["rf_details"] = json.loads(row_sel["rent_free_details"])
+                    except:
+                        pass
+                if row_sel.get("floor_details"):
+                    try:
+                        default_vals["floor_details"] = json.loads(row_sel["floor_details"])
+                    except:
+                        pass
+
             default_vals["deposit"] = int(row_sel["deposit"])
             default_vals["rent"] = int(row_sel["monthly_rent"])
             default_vals["maint"] = int(row_sel["monthly_maintenance_fee"])
@@ -2399,11 +2457,19 @@ with tab_contract_update:
             st.markdown("#### 기본 계약 형태")
             col_t1, col_t2 = st.columns(2)
             with col_t1:
+                idx_ct = 0
+                if update_mode in ["🔄 계약 갱신", "📝 기존 계약 수정"]:
+                    if len(default_vals.get("floor_details", {})) > 1 or "," in default_vals["floor"]:
+                        idx_ct = 1
                 contract_type = st.radio(
-                    "계약 형태", ["단층 계약", "복층 계약"], horizontal=True
+                    "계약 형태", ["단층 계약", "복층 계약"], index=idx_ct, horizontal=True
                 )
             with col_t2:
-                currency = st.radio("계약 통화", ["KRW", "USD"], horizontal=True)
+                idx_curr = 0
+                if update_mode in ["🔄 계약 갱신", "📝 기존 계약 수정"]:
+                    if "USD" in str(row_sel.get("currency", "")):
+                        idx_curr = 1
+                currency = st.radio("계약 통화", ["KRW", "USD"], index=idx_curr, horizontal=True)
 
             st.markdown("---")
             col_a, col_b = st.columns(2)
@@ -2447,7 +2513,10 @@ with tab_contract_update:
                 else:
                     if update_mode == "🔄 계약 갱신":
                         st.info("복층 갱신 시 기존 층 정보를 재선택해주세요.")
-                    sel_floors = st.multiselect("해당 층 다중 선택", floor_list)
+                    def_floors = []
+                    if update_mode == "📝 기존 계약 수정" and default_vals.get("floor_details"):
+                        def_floors = [f for f in default_vals["floor_details"].keys() if f in floor_list]
+                    sel_floors = st.multiselect("해당 층 다중 선택", floor_list, default=def_floors)
 
             st.markdown("---")
             st.markdown("#### 업체 및 면적 정보")
@@ -2485,12 +2554,19 @@ with tab_contract_update:
                     contract_area = 0.0
                     contract_exclusive_area = 0.0
                     for fl in sel_floors:
+                        def_fl_area = 0.0
+                        def_fl_exc = 0.0
+                        if update_mode == "📝 기존 계약 수정" and default_vals.get("floor_details"):
+                            if fl in default_vals["floor_details"]:
+                                def_fl_area = float(default_vals["floor_details"][fl].get("area", 0.0))
+                                def_fl_exc = float(default_vals["floor_details"][fl].get("exclusive_area", 0.0))
                         col_f1, col_f2 = st.columns(2)
                         with col_f1:
                             fl_area = st.number_input(
                                 f"{fl} 총면적",
                                 min_value=0.0,
                                 step=1.0,
+                                value=def_fl_area,
                                 key=f"area_{fl}",
                             )
                         with col_f2:
@@ -2498,6 +2574,7 @@ with tab_contract_update:
                                 f"{fl} 전용면적",
                                 min_value=0.0,
                                 step=1.0,
+                                value=def_fl_exc,
                                 key=f"exc_area_{fl}",
                             )
                         floor_areas[fl] = {
@@ -2896,6 +2973,57 @@ with tab_contract_update:
                             st.success(
                                 f"🎉 '{company_name}' 계약이 성공적으로 갱신(버전 분리) 처리되었습니다."
                             )
+                            
+                        elif update_mode == "📝 기존 계약 수정":
+                            c.execute(
+                                """
+                                UPDATE Lease_Contracts SET
+                                    asset_name = %s, floor = %s, company_name = %s, contract_date = %s, start_date = %s, end_date = %s,
+                                    contract_area = %s, contract_exclusive_area = %s, deposit = %s, monthly_rent = %s, monthly_maintenance_fee = %s,
+                                    total_rent_free_months = %s, rent_free_details = %s,
+                                    currency = %s, floor_details = %s, escalation_cycle_years = %s, rent_inc_rate = %s, maint_inc_rate = %s, remarks = %s
+                                WHERE contract_id = %s
+                            """,
+                                (
+                                    asset_name,
+                                    floor_str,
+                                    company_name,
+                                    contract_date.strftime("%Y-%m-%d"),
+                                    start_date.strftime("%Y-%m-%d"),
+                                    end_date.strftime("%Y-%m-%d"),
+                                    float(contract_area),
+                                    float(contract_exclusive_area),
+                                    float(deposit),
+                                    float(monthly_rent),
+                                    float(monthly_maintenance_fee),
+                                    total_rf_months,
+                                    rf_details_json,
+                                    currency,
+                                    floor_details_json,
+                                    escalation_cycle_years,
+                                    rent_inc_rate,
+                                    maint_inc_rate,
+                                    remarks,
+                                    target_contract_id,
+                                ),
+                            )
+                            c.execute(
+                                """
+                                INSERT INTO Contract_History (contract_id, action_type, action_date, action_month, details)
+                                VALUES (%s, '정보수정', %s, %s, %s)
+                            """,
+                                (
+                                    target_contract_id,
+                                    today_str,
+                                    month_str,
+                                    json.dumps(history_details, ensure_ascii=False),
+                                ),
+                            )
+                            db_conn.commit()
+                            db_conn.close()
+                            fetch_data.clear()
+                            st.success(f"✏️ '{company_name}' 기존 계약 정보가 성공적으로 수정(UPDATE)되었습니다.")
+                            st.rerun()
 
                     except Exception as e:
                         st.error(f"데이터베이스 저장 오류: {e}")

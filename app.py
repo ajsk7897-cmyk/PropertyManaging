@@ -2910,7 +2910,7 @@ with tab_contract_update:
                         old_data, new_data, comps_data
                     )
                     
-                    col_dl0, col_dl1, col_dl2, col_dl3 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
+                    col_dl1, col_dl2, col_dl3 = st.columns([4, 4, 2], vertical_alignment="bottom")
                     with col_dl1:
                         st.download_button(
                             "📄 갱신 기안서류 다운로드",
@@ -3643,7 +3643,7 @@ with tab_history:
                             old_data, new_data, comps_data
                         )
                         
-                        col_dl0, col_dl1, col_dl2, col_dl3 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
+                        col_dl1, col_dl2, col_dl3 = st.columns([4, 4, 2], vertical_alignment="bottom")
                         with col_dl1:
                             st.download_button(
                                 "📥 선택한 이력 기안파일 다운로드",

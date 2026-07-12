@@ -2909,13 +2909,35 @@ with tab_contract_update:
                     file_bytes, filename = generate_renewal_proposal(
                         old_data, new_data, comps_data
                     )
-                    st.download_button(
-                        "📄 갱신 기안서류(Renewal Proposal) 자동생성",
-                        data=file_bytes,
-                        file_name=filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                    )
+                    
+                    col_dl0, col_dl1, col_dl2, col_dl3 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
+                    with col_dl1:
+                        st.download_button(
+                            "📄 갱신 기안서류 다운로드",
+                            data=file_bytes,
+                            file_name=filename,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                        )
+                    with col_dl2:
+                        to_email_renewal = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key="email_renewal_entry")
+                    with col_dl3:
+                        if st.button("🚀 메일 발송", key="btn_email_renewal_entry", use_container_width=True):
+                            if to_email_renewal:
+                                success, err = send_email_with_attachment(
+                                    to_email=to_email_renewal,
+                                    subject=f"[PM/AM] {company_name} 갱신 기안서류",
+                                    body=f"요청하신 {company_name}의 갱신 기안서류(Excel)를 첨부하여 보내드립니다.",
+                                    file_bytes=file_bytes,
+                                    file_name=filename,
+                                    mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                )
+                                if success:
+                                    st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
+                                else:
+                                    st.error(f"메일 발송 실패: {err}")
+                            else:
+                                st.warning("이메일 주소를 입력해주세요.")
                 except Exception as e:
                     st.warning(f"기안서류 생성 로딩 중 오류 (템플릿 확인 필요): {e}")
 

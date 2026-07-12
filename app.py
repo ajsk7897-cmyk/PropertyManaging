@@ -1209,7 +1209,7 @@ with tab_asset_view:
         csv_dash = dashboard_df_conv.to_csv(index=False).encode("utf-8-sig")
         file_name_dash = f"asset_total_dashboard_{unit_option}.csv"
 
-        col_dash1, col_dash2, col_dash3, col_dash4 = st.columns([4, 2, 3, 2], vertical_alignment="bottom")
+        col_dash1, col_dash2, col_dash3, col_dash4 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
         with col_dash1:
             st.markdown("### 📊 자산별 토탈 대시보드")
             
@@ -1301,7 +1301,7 @@ with tab_asset_view:
         csv = display_df_conv.to_csv(index=False).encode("utf-8-sig")
         file_name_1 = f"asset_area_status_{unit_option}.csv"
 
-        col_a1, col_a2, col_a3, col_a4 = st.columns([4, 2, 3, 2], vertical_alignment="bottom")
+        col_a1, col_a2, col_a3, col_a4 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
         with col_a1:
             st.markdown("### 🏢 자산별 층별 상세 현황")
             
@@ -1594,7 +1594,7 @@ with tab_lease_info:
         csv2 = df_display.to_csv(index=False).encode("utf-8-sig")
         file_name_2 = "lease_contracts.csv"
 
-        col_sum1, col_sum2, col_sum3, col_sum4 = st.columns([4, 2, 3, 2], vertical_alignment="bottom")
+        col_sum1, col_sum2, col_sum3, col_sum4 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
         with col_sum1:
             st.markdown("### 📊 자산 통합 Summary")
             
@@ -1870,7 +1870,7 @@ with tab_rent_roll:
             csv_rr = df_rr.to_csv(index=False).encode("utf-8-sig")
             file_name_3 = f"rent_roll_{selected_year}_details.csv"
 
-            col_r1, col_r2, col_r3, col_r4 = st.columns([4, 2, 3, 2], vertical_alignment="bottom")
+            col_r1, col_r2, col_r3, col_r4 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
             with col_r1:
                 st.markdown(f"### {selected_year}년 렌트롤 상세 내역")
                 
@@ -3621,7 +3621,7 @@ with tab_history:
                             old_data, new_data, comps_data
                         )
                         
-                        col_dl0, col_dl1, col_dl2, col_dl3 = st.columns([4, 2, 3, 2], vertical_alignment="bottom")
+                        col_dl0, col_dl1, col_dl2, col_dl3 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
                         with col_dl1:
                             st.download_button(
                                 "📥 선택한 이력 기안파일 다운로드",

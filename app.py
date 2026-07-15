@@ -205,63 +205,20 @@ def send_email_with_attachment(to_email, subject, body, file_bytes, file_name, m
 
 
 
-def calculate_escalated_amount(row, target_date):
-    start_date = pd.to_datetime(row["start_date"])
-    initial_rent = (
-        float(row["monthly_rent"])
-        if "monthly_rent" in row and pd.notnull(row["monthly_rent"])
-        else 0.0
-    )
-    initial_maint = (
-        float(row["monthly_maintenance_fee"])
-        if "monthly_maintenance_fee" in row
-        and pd.notnull(row["monthly_maintenance_fee"])
-        else 0.0
-    )
-
-    esc_cycle = (
-        int(row["escalation_cycle_years"])
-        if "escalation_cycle_years" in row and pd.notnull(row["escalation_cycle_years"])
-        else 0
-    )
-    rent_inc = (
-        float(row["rent_inc_rate"])
-        if "rent_inc_rate" in row and pd.notnull(row["rent_inc_rate"])
-        else 0.0
-    )
-    maint_inc = (
-        float(row["maint_inc_rate"])
-        if "maint_inc_rate" in row and pd.notnull(row["maint_inc_rate"])
-        else 0.0
-    )
-
-    SYSTEM_BASE_DATE = datetime(2026, 7, 1)
-
-    if start_date < SYSTEM_BASE_DATE:
-        base_elapsed = (2026 - start_date.year) - (1 if 7 < start_date.month else 0)
-        base_cycles = base_elapsed // esc_cycle if esc_cycle > 0 else 0
-    else:
-        base_cycles = 0
-
-    target_elapsed = (target_date.year - start_date.year) - (
-        1 if target_date.month < start_date.month else 0
-    )
-    target_cycles = target_elapsed // esc_cycle if esc_cycle > 0 else 0
-
-    cycles_to_apply = target_cycles - base_cycles
-
-    escalated_rent = initial_rent * ((1 + rent_inc / 100.0) ** cycles_to_apply)
-    escalated_maint = initial_maint * ((1 + maint_inc / 100.0) ** cycles_to_apply)
-
-    currency = (
-        row["currency"] if "currency" in row and pd.notnull(row["currency"]) else "KRW"
-    )
-
-    if currency == "KRW":
-        escalated_rent = (escalated_rent // 10) * 10
-        escalated_maint = (escalated_maint // 10) * 10
-
-    return escalated_rent, escalated_maint
+def get_scheduled_amount(rent_schedule_json, target_date, default_rent, default_maint, currency="KRW"):
+    import json
+    if rent_schedule_json:
+        try:
+            schedule = json.loads(rent_schedule_json)
+            for period in schedule:
+                # Check if target_date falls within the period
+                s_date = pd.to_datetime(period["start_date"])
+                e_date = pd.to_datetime(period["end_date"])
+                if s_date.date() <= target_date.date() <= e_date.date():
+                    return float(period.get("rent", 0.0)), float(period.get("maint", 0.0))
+        except:
+            pass
+    return default_rent, default_maint
 
 
 def highlight_total_row(row):
@@ -489,6 +446,7 @@ def init_db():
         ("rent_inc_rate", "REAL"),
         ("maint_inc_rate", "REAL"),
         ("contract_exclusive_area", "REAL"),
+        ("rent_schedule", "TEXT"),
         ("remarks", "TEXT"),
     ]
     for col_name, col_type in new_columns:
@@ -1770,27 +1728,14 @@ with tab_rent_roll:
 
                 status_str = f"[{row['status']}] " if row["status"] != "ACTIVE" else ""
 
-                # Parse floor details
-                fd_raw = (
-                    row["floor_details"]
-                    if "floor_details" in row and pd.notnull(row["floor_details"])
-                    else None
-                )
-                if fd_raw:
-                    try:
-                        floors_info = json.loads(fd_raw)
-                    except:
-                        floors_info = {row["floor"]: {"ratio": 1.0}}
-                else:
-                    floors_info = {row["floor"]: {"ratio": 1.0}}
-
-                # Create a record for each floor
-                floor_records = {}
-                for fl in floors_info.keys():
-                    floor_records[fl] = {
+                # 5. 복층 계약 렌트롤 표기 방식 변경 (단일 행 통합)
+                # 단일 층 표기로 통합, 비율 배분 제거
+                floor_name_unified = row["floor"]
+                floor_records = {
+                    floor_name_unified: {
                         "Contract_ID": row["contract_id"],
                         "자산명": row["asset_name"],
-                        "층": fl,
+                        "층": floor_name_unified,
                         "업체명": status_str + row["company_name"],
                         "통화": (
                             row["currency"]
@@ -1798,6 +1743,7 @@ with tab_rent_roll:
                             else "KRW"
                         ),
                     }
+                }
 
                 start_month = 6 if selected_year == 2026 else 1
                 for month in range(start_month, 13):
@@ -1806,31 +1752,34 @@ with tab_rent_roll:
                     curr_month_start = datetime(selected_year, month, 1)
                     curr_month_end = datetime(selected_year, month, last_day)
 
-                    # 1. Escalation Logic
-                    escalated_rent, escalated_maint = calculate_escalated_amount(
-                        row, curr_month_start
-                    )
+                    initial_rent = float(row.get("monthly_rent", 0.0) or 0.0)
+                    initial_maint = float(row.get("monthly_maintenance_fee", 0.0) or 0.0)
+                    rent_schedule_json = row.get("rent_schedule", None)
+                    currency = row.get("currency", "KRW")
 
-                    # 2. Floor to 10 won (already handled in calculate_escalated_amount for KRW)
-                    rent_rounded = escalated_rent
-                    maint_rounded = escalated_maint
+                    # 7. 렌트롤 산출 시 rent_schedule 기반 연산 수행
+                    scheduled_rent, scheduled_maint = get_scheduled_amount(
+                        rent_schedule_json, 
+                        curr_month_start, 
+                        initial_rent, 
+                        initial_maint, 
+                        currency
+                    )
 
                     overlap_start = max(start, curr_month_start)
                     overlap_end = min(end, curr_month_end)
 
                     is_rf = month_str in rf_details
-                    actual_rent_total = 0 if is_rf else rent_rounded
-                    actual_maint_total = maint_rounded
+                    actual_rent_total = 0 if is_rf else scheduled_rent
+                    actual_maint_total = scheduled_maint
 
                     if overlap_start <= overlap_end:
                         days_in_overlap = (overlap_end - overlap_start).days + 1
                         if days_in_overlap < last_day:
-                            rent_to_charge_total = (
-                                actual_rent_total / last_day
-                            ) * days_in_overlap
-                            maint_to_charge_total = (
-                                actual_maint_total / last_day
-                            ) * days_in_overlap
+                            # 4. 명확한 일할 계산(Proration) 공식 주석 추가
+                            # (해당월 기준금액 / 해당월 총 일수) * 해당월 실제 계약일수
+                            rent_to_charge_total = (actual_rent_total / last_day) * days_in_overlap
+                            maint_to_charge_total = (actual_maint_total / last_day) * days_in_overlap
                         else:
                             rent_to_charge_total = actual_rent_total
                             maint_to_charge_total = actual_maint_total
@@ -1838,19 +1787,25 @@ with tab_rent_roll:
                         rent_to_charge_total = 0
                         maint_to_charge_total = 0
 
-                    # 3. Distribute by floor
-                    for fl, info in floors_info.items():
-                        if (row["contract_id"], fl, month) in overrides_dict:
-                            o_rent, o_maint = overrides_dict[(row["contract_id"], fl, month)]
-                            floor_rent = o_rent
-                            floor_maint = o_maint
-                        else:
-                            ratio = info.get("ratio", 1.0)
-                            floor_rent = rent_to_charge_total * ratio
-                            floor_maint = maint_to_charge_total * ratio
+                    # 단일 행 표출이므로 비율 분배 로직(ratio) 삭제
+                    if (row["contract_id"], floor_name_unified, month) in overrides_dict:
+                        o_rent, o_maint = overrides_dict[(row["contract_id"], floor_name_unified, month)]
+                        floor_rent = o_rent
+                        floor_maint = o_maint
+                    else:
+                        floor_rent = rent_to_charge_total
+                        floor_maint = maint_to_charge_total
 
-                        floor_records[fl][f"{month}월 임대료"] = round(floor_rent)
-                        floor_records[fl][f"{month}월 관리비"] = round(floor_maint)
+                    # 1. 10원 미만 원단위 절사 (Round-down)
+                    if currency == "KRW":
+                        floor_rent = int(floor_rent // 10) * 10
+                        floor_maint = int(floor_maint // 10) * 10
+                    else:
+                        floor_rent = round(floor_rent, 2)
+                        floor_maint = round(floor_maint, 2)
+
+                    floor_records[floor_name_unified][f"{month}월 임대료"] = floor_rent
+                    floor_records[floor_name_unified][f"{month}월 관리비"] = floor_maint
 
                 for fl, rec in floor_records.items():
                     records.append(rec)
@@ -2052,6 +2007,17 @@ with tab_rent_roll:
                     changes_made = 0
 
                     def process_edited(df_edited, df_orig):
+                        def safe_to_float(val):
+                            if pd.isna(val) or val is None or str(val).strip() == "":
+                                return 0.0
+                            try:
+                                import re
+                                cleaned = re.sub(r"[^\d\.\-]", "", str(val))
+                                if not cleaned: return 0.0
+                                return float(cleaned)
+                            except:
+                                return 0.0
+
                         cnt = 0
                         if df_edited is None or df_edited.empty:
                             return cnt
@@ -2071,8 +2037,8 @@ with tab_rent_roll:
                                 ) != str(old_maint):
                                     cid = int(df_edited.loc[idx, "Contract_ID"])
                                     fl = str(df_edited.loc[idx, "층"])
-                                    val_rent = float(str(new_rent).replace(",", "").replace("₩", "").replace("USD", "").replace(" ", ""))
-                                    val_maint = float(str(new_maint).replace(",", "").replace("₩", "").replace("USD", "").replace(" ", ""))
+                                    val_rent = safe_to_float(new_rent)
+                                    val_maint = safe_to_float(new_maint)
                                     c.execute(
                                         """
                                         INSERT INTO RentRoll_Overrides (contract_id, floor, year, month, over_rent, over_maint)
@@ -2614,6 +2580,8 @@ with tab_contract_update:
                         default_vals["floor_details"] = json.loads(row_sel["floor_details"])
                     except:
                         pass
+                if row_sel.get("rent_schedule"):
+                    default_vals["rent_schedule"] = row_sel["rent_schedule"]
 
             default_vals["deposit"] = int(row_sel["deposit"])
             default_vals["rent"] = int(row_sel["monthly_rent"])
@@ -2804,25 +2772,38 @@ with tab_contract_update:
                     else 0
                 )
 
-            st.markdown("#### 📈 정기 인상 (Escalation)")
-            use_escalation = st.checkbox("정기 인상 적용")
+            st.markdown("#### 📈 기간별 스케줄 (Rent Schedule)")
+            st.info("해당 계약의 임대료 및 관리비 변동 스케줄을 입력하세요. 최초에는 전체 기간에 대한 단일 스케줄이 생성됩니다.")
+            
+            default_schedule_json = default_vals.get("rent_schedule", "")
+            schedule_list = []
+            if default_schedule_json:
+                try:
+                    schedule_list = json.loads(default_schedule_json)
+                except:
+                    pass
+            if not schedule_list:
+                schedule_list = [
+                    {
+                        "start_date": start_date.strftime("%Y-%m-%d"),
+                        "end_date": end_date.strftime("%Y-%m-%d"),
+                        "rent": monthly_rent,
+                        "maint": monthly_maintenance_fee
+                    }
+                ]
+            
+            df_schedule = pd.DataFrame(schedule_list)
+            edited_schedule_df = st.data_editor(
+                df_schedule,
+                num_rows="dynamic",
+                use_container_width=True,
+                key=f"rent_schedule_editor"
+            )
+            rent_schedule_json = edited_schedule_df.to_json(orient="records", force_ascii=False)
+            
             escalation_cycle_years = 0
             rent_inc_rate = 0.0
             maint_inc_rate = 0.0
-            if use_escalation:
-                col_e1, col_e2, col_e3 = st.columns(3)
-                with col_e1:
-                    escalation_cycle_years = st.number_input(
-                        "인상 주기 (년)", min_value=1, step=1, value=1
-                    )
-                with col_e2:
-                    rent_inc_rate = st.number_input(
-                        "임대료 인상률 (%)", min_value=0.0, step=0.1, value=5.0
-                    )
-                with col_e3:
-                    maint_inc_rate = st.number_input(
-                        "관리비 인상률 (%)", min_value=0.0, step=0.1, value=5.0
-                    )
 
             st.markdown("---")
             st.markdown("#### 🎁 새로운 렌트프리 설정")
@@ -3000,8 +2981,8 @@ with tab_contract_update:
                                     asset_name, floor, company_name, contract_date, start_date, end_date,
                                     contract_area, contract_exclusive_area, deposit, monthly_rent, monthly_maintenance_fee,
                                     total_rent_free_months, rent_free_details, status,
-                                    currency, floor_details, escalation_cycle_years, rent_inc_rate, maint_inc_rate, remarks
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s)
+                                    currency, floor_details, escalation_cycle_years, rent_inc_rate, maint_inc_rate, rent_schedule, remarks
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s)
                             """,
                                 (
                                     asset_name,
@@ -3022,6 +3003,7 @@ with tab_contract_update:
                                     escalation_cycle_years,
                                     rent_inc_rate,
                                     maint_inc_rate,
+                                    rent_schedule_json,
                                     remarks,
                                 ),
                             )
@@ -3118,8 +3100,8 @@ with tab_contract_update:
                                     asset_name, floor, company_name, contract_date, start_date, end_date,
                                     contract_area, contract_exclusive_area, deposit, monthly_rent, monthly_maintenance_fee,
                                     total_rent_free_months, rent_free_details, status, parent_contract_id,
-                                    currency, floor_details, escalation_cycle_years, rent_inc_rate, maint_inc_rate, remarks
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s)
+                                    currency, floor_details, escalation_cycle_years, rent_inc_rate, maint_inc_rate, rent_schedule, remarks
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s, %s)
                             """,
                                 (
                                     asset_name,
@@ -3141,6 +3123,7 @@ with tab_contract_update:
                                     escalation_cycle_years,
                                     rent_inc_rate,
                                     maint_inc_rate,
+                                    rent_schedule_json,
                                     remarks,
                                 ),
                             )
@@ -3174,7 +3157,7 @@ with tab_contract_update:
                                     asset_name = %s, floor = %s, company_name = %s, contract_date = %s, start_date = %s, end_date = %s,
                                     contract_area = %s, contract_exclusive_area = %s, deposit = %s, monthly_rent = %s, monthly_maintenance_fee = %s,
                                     total_rent_free_months = %s, rent_free_details = %s,
-                                    currency = %s, floor_details = %s, escalation_cycle_years = %s, rent_inc_rate = %s, maint_inc_rate = %s, remarks = %s
+                                    currency = %s, floor_details = %s, escalation_cycle_years = %s, rent_inc_rate = %s, maint_inc_rate = %s, rent_schedule = %s, remarks = %s
                                 WHERE contract_id = %s
                             """,
                                 (
@@ -3196,6 +3179,7 @@ with tab_contract_update:
                                     escalation_cycle_years,
                                     rent_inc_rate,
                                     maint_inc_rate,
+                                    rent_schedule_json,
                                     remarks,
                                     target_contract_id,
                                 ),
@@ -3413,14 +3397,17 @@ with tab_contract_update:
                                 floor_details_dict, ensure_ascii=False
                             )
 
+                            rent_schedule = [{"start_date": s_date, "end_date": e_date, "rent": rent, "maint": maint}]
+                            rent_schedule_json = json.dumps(rent_schedule, ensure_ascii=False)
+
                             c.execute(
                                 """
                                 INSERT INTO Lease_Contracts (
                                     asset_name, floor, company_name, contract_date, start_date, end_date,
                                     contract_area, contract_exclusive_area, deposit, monthly_rent, monthly_maintenance_fee,
                                     total_rent_free_months, rent_free_details, status,
-                                    currency, floor_details, escalation_cycle_years, rent_inc_rate, maint_inc_rate, remarks
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s)
+                                    currency, floor_details, escalation_cycle_years, rent_inc_rate, maint_inc_rate, rent_schedule, remarks
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s)
                             """,
                                 (
                                     asset_name,
@@ -3441,6 +3428,7 @@ with tab_contract_update:
                                     esc_cycle,
                                     r_inc,
                                     m_inc,
+                                    rent_schedule_json,
                                     remarks,
                                 ),
                             )

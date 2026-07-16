@@ -30,7 +30,7 @@ def generate_formatted_excel(df, subtotal_indices=None):
         header_font = Font(name='맑은 고딕', bold=True, color="000000")
         subtotal_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
         subtotal_font = Font(name='맑은 고딕', bold=True)
-        zebra_fill = PatternFill(start_color="F4F4F4", end_color="F4F4F4", fill_type="solid")
+        zebra_fill = PatternFill(start_color="E8F5E9", end_color="E8F5E9", fill_type="solid")
         data_font = Font(name='맑은 고딕')
         
         center_align = Alignment(horizontal='center', vertical='center')

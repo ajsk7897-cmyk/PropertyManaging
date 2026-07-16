@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import pandas as pd
 import plotly.express as px
 import psycopg2
@@ -1685,7 +1685,7 @@ with tab_lease_info:
         df_krw = df_display[df_display["통화"] == "KRW"].copy()
         df_usd = df_display[df_display["통화"] == "USD"].copy()
 
-        csv2 = df_display.to_csv(index=False).encode("utf-8-sig")
+        csv2 = generate_formatted_excel(df_display)
         file_name_2 = "lease_contracts.csv"
 
         col_sum1, col_sum2, col_sum3, col_sum4 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
@@ -2229,7 +2229,7 @@ with tab_asset_update:
             "은행 및 지점 사용 면적",
         ]
     )
-    template_csv = template_df.to_csv(index=False).encode("utf-8-sig")
+    template_csv = generate_formatted_excel(template_df)
     st.download_button(
         "📝 빈 양식 다운로드 (CSV)",
         data=template_csv,
@@ -3384,7 +3384,7 @@ with tab_contract_update:
             "기타 특약": "매년 11월 1일 인상",
         }
         df_template = pd.DataFrame([example_data], columns=template_cols)
-        csv_template = df_template.to_csv(index=False).encode("utf-8-sig")
+        csv_template = generate_formatted_excel(df_template)
         st.download_button(
             "📝 빈 양식 다운로드 (CSV)",
             data=csv_template,

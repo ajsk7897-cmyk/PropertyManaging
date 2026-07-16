@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import pandas as pd
 import plotly.express as px
 import psycopg2
@@ -11,7 +11,127 @@ import smtplib
 from email.message import EmailMessage
 import os
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
 
+def generate_formatted_excel(df, subtotal_indices=None):
+    if subtotal_indices is None:
+        subtotal_indices = []
+        
+    output = io.BytesIO()
+    
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Sheet1')
+        wb = writer.book
+        ws = writer.sheets['Sheet1']
+        
+        # 스타일 정의
+        header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+        header_font = Font(bold=True)
+        subtotal_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+        subtotal_font = Font(bold=True)
+        
+        double_border = Border(
+            top=Side(style='double'), 
+            bottom=Side(style='double'),
+            left=Side(style='thin'),
+            right=Side(style='thin')
+        )
+        thin_border = Border(
+            top=Side(style='thin'), 
+            bottom=Side(style='thin'),
+            left=Side(style='thin'),
+            right=Side(style='thin')
+        )
+        
+        # 헤더 스타일 및 틀고정
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+        ws.freeze_panes = 'A2'
+        
+        max_row = ws.max_row
+        max_col = ws.max_column
+        
+        # 데이터 서식
+        for row in range(2, max_row + 1):
+            is_subtotal = (row - 2) in subtotal_indices
+            is_last_row = (row == max_row)
+            
+            for col in range(1, max_col + 1):
+                cell = ws.cell(row=row, column=col)
+                
+                current_border = thin_border
+                
+                if is_subtotal:
+                    cell.fill = subtotal_fill
+                    cell.font = subtotal_font
+                    current_border = double_border
+                
+                if is_last_row and not is_subtotal:
+                    current_border = Border(
+                        top=Side(style='thin'),
+                        bottom=Side(style='double'),
+                        left=Side(style='thin'),
+                        right=Side(style='thin')
+                    )
+                
+                cell.border = current_border
+                
+                # 숫자 서식 (콤마)
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = '#,##0'
+                
+                # 날짜 서식
+                if isinstance(cell.value, datetime) or isinstance(cell.value, pd.Timestamp):
+                    cell.number_format = 'yyyy-mm-dd'
+                    
+        # 열 너비 자동 맞춤
+        for col in range(1, max_col + 1):
+            max_length = 0
+            column_letter = get_column_letter(col)
+            for cell in ws[column_letter]:
+                try:
+                    if cell.value:
+                        lines = str(cell.value).split('\n')
+                        for line in lines:
+                            length = sum(1.5 if ord(c) > 127 else 1 for c in line)
+                            if length > max_length:
+                                max_length = length
+                except:
+                    pass
+            adjusted_width = max_length + 2
+            ws.column_dimensions[column_letter].width = min(adjusted_width, 50)
+            
+    return output.getvalue()
+
+def add_subtotal_rows(df, group_col):
+    new_rows = []
+    subtotal_indices = []
+    current_index = 0
+    
+    for name, group in df.groupby(group_col, sort=False):
+        for _, row in group.iterrows():
+            new_rows.append(row.to_dict())
+            current_index += 1
+            
+        subtotal = {}
+        for col in df.columns:
+            if col == group_col:
+                subtotal[col] = f"[{name} 소계]"
+            elif col in ["Contract_ID", "contract_id", "id", "ID", "연도", "월", "계약일", "계약시작일", "계약종료일"]:
+                subtotal[col] = None
+            elif pd.api.types.is_numeric_dtype(df[col]):
+                subtotal[col] = group[col].sum()
+            else:
+                subtotal[col] = None
+        new_rows.append(subtotal)
+        subtotal_indices.append(current_index)
+        current_index += 1
+        
+    return pd.DataFrame(new_rows), subtotal_indices
 st.set_page_config(
     page_title="상업용 부동산 자산관리 (PM/AM)",
     layout="wide",
@@ -1164,8 +1284,8 @@ with tab_asset_view:
             for col in area_cols:
                 dashboard_df_conv[col] = (dashboard_df_conv[col] * 35.58).round(2)
 
-        csv_dash = dashboard_df_conv.to_csv(index=False).encode("utf-8-sig")
-        file_name_dash = f"asset_total_dashboard_{unit_option}.csv"
+        csv_dash = generate_formatted_excel(dashboard_df_conv)
+        file_name_dash = f"asset_total_dashboard_{unit_option}.xlsx"
 
         col_dash1, col_dash2, col_dash3, col_dash4 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
         with col_dash1:
@@ -1173,10 +1293,10 @@ with tab_asset_view:
             
         with col_dash2:
             st.download_button(
-                "📊 토탈 CSV 다운로드",
+                "📊 토탈 엑셀 다운로드",
                 data=csv_dash,
                 file_name=file_name_dash,
-                mime="text/csv",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
             
@@ -1192,7 +1312,7 @@ with tab_asset_view:
                         body="요청하신 자산별 토탈 대시보드 리포트 파일을 첨부하여 보내드립니다.",
                         file_bytes=csv_dash,
                         file_name=file_name_dash,
-                        mime_type="text/csv"
+                        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                     if success:
                         st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
@@ -1256,8 +1376,8 @@ with tab_asset_view:
             for col in area_cols:
                 display_df_conv[col] = (display_df_conv[col] * 35.58).round(2)
 
-        csv = display_df_conv.to_csv(index=False).encode("utf-8-sig")
-        file_name_1 = f"asset_area_status_{unit_option}.csv"
+        csv = generate_formatted_excel(display_df_conv)
+        file_name_1 = f"asset_area_status_{unit_option}.xlsx"
 
         col_a1, col_a2, col_a3, col_a4 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
         with col_a1:
@@ -1265,10 +1385,10 @@ with tab_asset_view:
             
         with col_a2:
             st.download_button(
-                "📊 현황 CSV 다운로드",
+                "📊 현황 엑셀 다운로드",
                 data=csv,
                 file_name=file_name_1,
-                mime="text/csv",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
             
@@ -1284,7 +1404,7 @@ with tab_asset_view:
                         body="요청하신 자산별 면적 현황 리포트 파일을 첨부하여 보내드립니다.",
                         file_bytes=csv,
                         file_name=file_name_1,
-                        mime_type="text/csv"
+                        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                     if success:
                         st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
@@ -1558,10 +1678,10 @@ with tab_lease_info:
             
         with col_sum2:
             st.download_button(
-                "📝 전체 통합 CSV 다운로드",
+                "📝 전체 통합 엑셀 다운로드",
                 data=csv2,
                 file_name=file_name_2,
-                mime="text/csv",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
             
@@ -1577,7 +1697,7 @@ with tab_lease_info:
                         body="요청하신 통합 임대정보 리포트 파일을 첨부하여 보내드립니다.",
                         file_bytes=csv2,
                         file_name=file_name_2,
-                        mime_type="text/csv"
+                        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                     if success:
                         st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
@@ -1822,8 +1942,9 @@ with tab_rent_roll:
             df_rr_krw = df_rr[df_rr["통화"] == "KRW"].copy()
             df_rr_usd = df_rr[df_rr["통화"] == "USD"].copy()
 
-            csv_rr = df_rr.to_csv(index=False).encode("utf-8-sig")
-            file_name_3 = f"rent_roll_{selected_year}_details.csv"
+            df_rr_with_sub, sub_indices = add_subtotal_rows(df_rr, "자산명")
+            csv_rr = generate_formatted_excel(df_rr_with_sub, sub_indices)
+            file_name_3 = f"rent_roll_{selected_year}_details.xlsx"
 
             col_r1, col_r2, col_r3, col_r4 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
             with col_r1:
@@ -1831,10 +1952,10 @@ with tab_rent_roll:
                 
             with col_r2:
                 st.download_button(
-                    "📥 통합 렌트롤 CSV 다운로드",
+                    "📥 통합 렌트롤 엑셀 다운로드",
                     data=csv_rr,
                     file_name=file_name_3,
-                    mime="text/csv",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                 )
                 
@@ -1850,7 +1971,7 @@ with tab_rent_roll:
                             body=f"요청하신 {selected_year}년 렌트롤 상세 내역을 첨부하여 보내드립니다.",
                             file_bytes=csv_rr,
                             file_name=file_name_3,
-                            mime_type="text/csv"
+                            mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                         if success:
                             st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
@@ -2097,7 +2218,7 @@ with tab_asset_update:
         "📝 빈 양식 다운로드 (CSV)",
         data=template_csv,
         file_name="asset_upload_template.csv",
-        mime="text/csv",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
     st.info(
@@ -3252,7 +3373,7 @@ with tab_contract_update:
             "📝 빈 양식 다운로드 (CSV)",
             data=csv_template,
             file_name="contract_upload_template.csv",
-            mime="text/csv",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         st.info(
             "※ 다운로드한 양식에 맞춰 데이터를 입력하신 후 업로드해주세요. 모든 계약은 '단층'을 기준으로 임시 등록되며, 복층 등 특수 조건은 등록 후 개별 수정바랍니다."

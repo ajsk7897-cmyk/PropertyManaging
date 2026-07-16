@@ -300,6 +300,41 @@ st.markdown(
 .custom-st-table tr:hover td:nth-child(1) {
     background-color: #f8fafc;
 }
+
+    /* -------------------------------------------------------------------------- */
+    /* UI/UX 레이아웃 교정 (픽셀 매칭 및 줄바꿈 방지)                           */
+    /* -------------------------------------------------------------------------- */
+    
+    /* 1. 절대 줄바꿈 금지 (No-Wrap 강제) */
+    .stButton>button, 
+    [data-baseweb="tab"], 
+    td, th, 
+    [data-testid="stMetricLabel"], 
+    [data-testid="stMetricValue"] {
+        white-space: nowrap !important;
+        word-break: keep-all !important;
+        text-overflow: ellipsis;
+    }
+
+    /* 2. 입력창 및 버튼 규격(높이) 완벽 통일 */
+    .stTextInput input, 
+    .stNumberInput input, 
+    .stSelectbox div[data-baseweb="select"], 
+    .stButton button {
+        height: 42px !important;
+        line-height: 42px !important;
+        margin: 0 !important;
+    }
+
+    /* 3. 대시보드 메트릭 박스(KPI) 동일 높이화 */
+    [data-testid="metric-container"] {
+        min-height: 130px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
+    }
+    /* -------------------------------------------------------------------------- */
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -900,7 +935,7 @@ with tab_master_dashboard:
         vacant_area = max(0, total_exclusive_area - total_occupied)
 
         st.markdown("### 📊 포트폴리오 핵심 지표 (Executive KPIs)")
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4 = st.columns(4, vertical_alignment="bottom")
         c1.metric(
             "통합 관리 자산 및 임대율",
             f"{total_assets}개",
@@ -925,7 +960,7 @@ with tab_master_dashboard:
 
         # [2단: 3대 핵심 시각화 차트]
         st.markdown("### 📈 통합 데이터 시각화 (Portfolio Analytics)")
-        p1, p2 = st.columns(2)
+        p1, p2 = st.columns(2, vertical_alignment="bottom")
         
         sc_palette = ["#005EB8", "#00A546", "#38BDF8", "#34D399", "#94A3B8"]
 
@@ -1050,7 +1085,7 @@ with tab_market_research:
     
     market_df = fetch_market_research_data()
     
-    f1, f2, f3 = st.columns(3)
+    f1, f2, f3 = st.columns(3, vertical_alignment="bottom")
     with f1:
         sel_regions = st.multiselect("📍 지역명(시/도)", options=market_df["지역명(시/도)"].unique(), default=["서울"])
     with f2:
@@ -1073,7 +1108,7 @@ with tab_market_research:
         agg_df = filtered_mdf.groupby("세부 상권명")[["평당 임대료", "공실률(%)"]].mean().reset_index()
         agg_df = agg_df.sort_values(by="평당 임대료", ascending=False)
         
-        c1, c2 = st.columns(2)
+        c1, c2 = st.columns(2, vertical_alignment="bottom")
         with c1:
             with st.container(border=True):
                 st.markdown("#### 상권별 평균 평당 임대료")
@@ -1580,7 +1615,7 @@ with tab_lease_info:
 
     if not df_contracts.empty:
         # Filters
-        col_f1, col_f2 = st.columns(2)
+        col_f1, col_f2 = st.columns(2, vertical_alignment="bottom")
         with col_f1:
             assets = df_contracts["asset_name"].unique().tolist()
             sel_assets = st.multiselect(
@@ -1807,7 +1842,7 @@ with tab_rent_roll:
     df_c = fetch_data("SELECT * FROM Lease_Contracts")
 
     if not df_c.empty:
-        col_f1, col_f2, col_y1 = st.columns(3)
+        col_f1, col_f2, col_y1 = st.columns(3, vertical_alignment="bottom")
         with col_f1:
             assets = df_c["asset_name"].unique().tolist()
             sel_assets = st.multiselect(
@@ -2363,7 +2398,7 @@ with tab_asset_update:
                 default_bank = float(row.get("bank_area", 0.0))
 
     with st.form("asset_manual_form"):
-        col_m1, col_m2 = st.columns(2)
+        col_m1, col_m2 = st.columns(2, vertical_alignment="bottom")
         with col_m1:
             if asset_update_mode == "✨ 신규 자산 등록":
                 m_asset_name = st.text_input("자산명 (건물명)")
@@ -2535,7 +2570,7 @@ with tab_contract_update:
         st.markdown("#### 퇴점 처리 정보 입력")
         term_type = st.radio("퇴점 유형", ["만기 종료", "조기 종료"])
 
-        col_t1, col_t2 = st.columns(2)
+        col_t1, col_t2 = st.columns(2, vertical_alignment="bottom")
         with col_t1:
             term_date_default = pd.to_datetime(row_sel["end_date"]).date()
             if term_type == "조기 종료":
@@ -2731,7 +2766,7 @@ with tab_contract_update:
             )
 
             st.markdown("#### 기본 계약 형태")
-            col_t1, col_t2 = st.columns(2)
+            col_t1, col_t2 = st.columns(2, vertical_alignment="bottom")
             with col_t1:
                 idx_ct = 0
                 if update_mode in ["🔄 계약 갱신", "📝 기존 계약 수정"]:
@@ -2748,7 +2783,7 @@ with tab_contract_update:
                 currency = st.radio("계약 통화", ["KRW", "USD"], index=idx_curr, horizontal=True)
 
             st.markdown("---")
-            col_a, col_b = st.columns(2)
+            col_a, col_b = st.columns(2, vertical_alignment="bottom")
             with col_a:
                 try:
                     asset_idx = asset_list.index(default_vals["asset_name"])
@@ -2796,7 +2831,7 @@ with tab_contract_update:
 
             st.markdown("---")
             st.markdown("#### 업체 및 면적 정보")
-            col_c1, col_c2 = st.columns(2)
+            col_c1, col_c2 = st.columns(2, vertical_alignment="bottom")
             with col_c1:
                 company_name = st.text_input(
                     "🏢 업체명 (임차인)", value=default_vals["company"]
@@ -2805,7 +2840,7 @@ with tab_contract_update:
             floor_areas = {}
             with col_c2:
                 if contract_type == "단층 계약":
-                    col_f1, col_f2 = st.columns(2)
+                    col_f1, col_f2 = st.columns(2, vertical_alignment="bottom")
                     with col_f1:
                         contract_area = st.number_input(
                             "📐 계약 총면적 (평)",
@@ -2836,7 +2871,7 @@ with tab_contract_update:
                             if fl in default_vals["floor_details"]:
                                 def_fl_area = float(default_vals["floor_details"][fl].get("area", 0.0))
                                 def_fl_exc = float(default_vals["floor_details"][fl].get("exclusive_area", 0.0))
-                        col_f1, col_f2 = st.columns(2)
+                        col_f1, col_f2 = st.columns(2, vertical_alignment="bottom")
                         with col_f1:
                             fl_area = st.number_input(
                                 f"{fl} 총면적",
@@ -2864,7 +2899,7 @@ with tab_contract_update:
                     )
 
             st.markdown("---")
-            col_d1, col_d2, col_d3 = st.columns(3)
+            col_d1, col_d2, col_d3 = st.columns(3, vertical_alignment="bottom")
             with col_d1:
                 contract_date = st.date_input(
                     "📝 새 계약 체결일", value=default_vals["c_date"]
@@ -2880,7 +2915,7 @@ with tab_contract_update:
 
             st.markdown("---")
             st.markdown("#### 💳 임대 조건 (계약 전체 총액)")
-            col_f1, col_f2, col_f3 = st.columns(3)
+            col_f1, col_f2, col_f3 = st.columns(3, vertical_alignment="bottom")
             with col_f1:
                 dep_str = st.text_input(
                     "보증금 (총액)", value=f"{int(default_vals['deposit']):,}"
@@ -3655,7 +3690,7 @@ with tab_history:
         months = sorted(df_history["발생월"].unique().tolist(), reverse=True)
         types = sorted(df_history["유형"].unique().tolist())
 
-        col_h1, col_h2 = st.columns(2)
+        col_h1, col_h2 = st.columns(2, vertical_alignment="bottom")
         with col_h1:
             selected_month = st.selectbox("📅 이력 조회 연/월", ["전체보기"] + months)
         with col_h2:

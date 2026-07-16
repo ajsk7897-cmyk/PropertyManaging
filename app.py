@@ -1,4 +1,4 @@
-﻿import streamlit as st
+import streamlit as st
 import pandas as pd
 import plotly.express as px
 import psycopg2
@@ -26,10 +26,21 @@ def generate_formatted_excel(df, subtotal_indices=None):
         ws = writer.sheets['Sheet1']
         
         # 스타일 정의
-        header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-        header_font = Font(bold=True)
+        header_fill = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
+        header_font = Font(name='맑은 고딕', bold=True, color="000000")
         subtotal_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
-        subtotal_font = Font(bold=True)
+        subtotal_font = Font(name='맑은 고딕', bold=True)
+        zebra_fill = PatternFill(start_color="F4F4F4", end_color="F4F4F4", fill_type="solid")
+        data_font = Font(name='맑은 고딕')
+        
+        center_align = Alignment(horizontal='center', vertical='center')
+        
+        vertical_border = Border(
+            top=Side(border_style=None), 
+            bottom=Side(border_style=None),
+            left=Side(style='thin'),
+            right=Side(style='thin')
+        )
         
         double_border = Border(
             top=Side(style='double'), 
@@ -37,19 +48,23 @@ def generate_formatted_excel(df, subtotal_indices=None):
             left=Side(style='thin'),
             right=Side(style='thin')
         )
-        thin_border = Border(
-            top=Side(style='thin'), 
-            bottom=Side(style='thin'),
+        
+        bottom_double_border = Border(
+            top=Side(border_style=None),
+            bottom=Side(style='double'),
             left=Side(style='thin'),
             right=Side(style='thin')
         )
         
-        # 헤더 스타일 및 틀고정
+        # 헤더 스타일 (Top 1 Row)
         for cell in ws[1]:
             cell.fill = header_fill
             cell.font = header_font
-            cell.border = thin_border
-            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.alignment = center_align
+            # 헤더는 아래쪽에 얇은 실선이 있는게 좋으나, 샘플대로라면 세로만 있을수도 있음. 
+            # 일반적인 헤더 가독성을 위해 상단/하단도 실선 적용 (원래 prompt 기준)
+            cell.border = Border(top=Side(style='thin'), bottom=Side(style='thin'), left=Side(style='thin'), right=Side(style='thin'))
+            
         ws.freeze_panes = 'A2'
         
         max_row = ws.max_row
@@ -59,32 +74,33 @@ def generate_formatted_excel(df, subtotal_indices=None):
         for row in range(2, max_row + 1):
             is_subtotal = (row - 2) in subtotal_indices
             is_last_row = (row == max_row)
+            is_even = (row % 2 == 0)
             
             for col in range(1, max_col + 1):
                 cell = ws.cell(row=row, column=col)
                 
-                current_border = thin_border
+                # 공통 설정
+                cell.font = data_font
+                cell.alignment = center_align
                 
+                # 조건부 테두리 및 배경색
+                current_border = vertical_border
+                
+                if is_even and not is_subtotal:
+                    cell.fill = zebra_fill
+                    
                 if is_subtotal:
                     cell.fill = subtotal_fill
                     cell.font = subtotal_font
                     current_border = double_border
-                
-                if is_last_row and not is_subtotal:
-                    current_border = Border(
-                        top=Side(style='thin'),
-                        bottom=Side(style='double'),
-                        left=Side(style='thin'),
-                        right=Side(style='thin')
-                    )
+                elif is_last_row:
+                    current_border = bottom_double_border
                 
                 cell.border = current_border
                 
-                # 숫자 서식 (콤마)
+                # 숫자 및 날짜 서식
                 if isinstance(cell.value, (int, float)):
                     cell.number_format = '#,##0'
-                
-                # 날짜 서식
                 if isinstance(cell.value, datetime) or isinstance(cell.value, pd.Timestamp):
                     cell.number_format = 'yyyy-mm-dd'
                     
@@ -102,8 +118,8 @@ def generate_formatted_excel(df, subtotal_indices=None):
                                 max_length = length
                 except:
                     pass
-            adjusted_width = max_length + 2
-            ws.column_dimensions[column_letter].width = min(adjusted_width, 50)
+            adjusted_width = max_length * 1.2
+            ws.column_dimensions[column_letter].width = min(adjusted_width + 2, 50)
             
     return output.getvalue()
 

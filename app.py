@@ -1,4 +1,4 @@
-﻿import streamlit as st
+import streamlit as st
 import pandas as pd
 import plotly.express as px
 import psycopg2
@@ -476,16 +476,16 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css=""):
 
     if freeze_cols == 4:
         freeze_css = f"""
-        .{uid} th:nth-child(1), .{uid} td:nth-child(1) {{ position: -webkit-sticky; position: sticky; left: 0; z-index: 5; min-width: 150px; max-width: 150px; border-right: none !important; text-align: center !important; }}
-        .{uid} th:nth-child(2), .{uid} td:nth-child(2) {{ position: -webkit-sticky; position: sticky; left: 150px; z-index: 5; min-width: 100px; max-width: 100px; border-right: none !important; text-align: center !important; }}
-        .{uid} th:nth-child(3), .{uid} td:nth-child(3) {{ position: -webkit-sticky; position: sticky; left: 250px; z-index: 5; min-width: 200px; max-width: 200px; border-right: none !important; text-align: center !important; white-space: normal; word-break: break-all; }}
-        .{uid} th:nth-child(4), .{uid} td:nth-child(4) {{ position: -webkit-sticky; position: sticky; left: 450px; z-index: 5; min-width: 60px; max-width: 60px; border-right: none !important; text-align: center !important; }}
+        .{uid} th:nth-child(1), .{uid} td:nth-child(1) {{ position: -webkit-sticky; position: sticky; left: 0; z-index: 5; min-width: 150px; max-width: 150px; border-right: 1px solid #E2E8F0 !important; text-align: center !important; }}
+        .{uid} th:nth-child(2), .{uid} td:nth-child(2) {{ position: -webkit-sticky; position: sticky; left: 150px; z-index: 5; min-width: 100px; max-width: 100px; border-right: 1px solid #E2E8F0 !important; text-align: center !important; }}
+        .{uid} th:nth-child(3), .{uid} td:nth-child(3) {{ position: -webkit-sticky; position: sticky; left: 250px; z-index: 5; min-width: 200px; max-width: 200px; border-right: 1px solid #E2E8F0 !important; text-align: center !important; white-space: normal; word-break: break-all; }}
+        .{uid} th:nth-child(4), .{uid} td:nth-child(4) {{ position: -webkit-sticky; position: sticky; left: 450px; z-index: 5; min-width: 60px; max-width: 60px; border-right: 1px solid #E2E8F0 !important; text-align: center !important; }}
 
         .{uid} th:nth-child(-n+4) {{ z-index: 15; background-color: #F8FAFC !important; color: #334155 !important; font-weight: 600 !important; text-align: center !important; }}
         """
     else:
         freeze_css = f"""
-        .{uid} th:nth-child(1), .{uid} td:nth-child(1) {{ position: -webkit-sticky; position: sticky; left: 0; z-index: 5; border-right: none !important; }}
+        .{uid} th:nth-child(1), .{uid} td:nth-child(1) {{ position: -webkit-sticky; position: sticky; left: 0; z-index: 5; border-right: 1px solid #E2E8F0 !important; }}
         .{uid} th:nth-child(1) {{ z-index: 15; background-color: #F8FAFC !important; color: #334155 !important; font-weight: 600 !important; }}
         """
 
@@ -517,8 +517,8 @@ body {{ margin: 0; font-family: 'Pretendard', 'Inter', sans-serif; -webkit-font-
     font-weight: 600 !important;
     text-align: center !important;
     padding: 0.75rem 1rem !important;
-    border-bottom: 1px solid #F1F5F9 !important;
-    border-right: none !important;
+    border-bottom: 1px solid #E2E8F0 !important;
+    border-right: 1px solid #E2E8F0 !important;
     position: -webkit-sticky;
     position: sticky;
     top: 0;
@@ -527,27 +527,30 @@ body {{ margin: 0; font-family: 'Pretendard', 'Inter', sans-serif; -webkit-font-
 .custom-st-table.{uid} td {{
     padding: 0.75rem 1rem !important;
     text-align: right !important;
-    border-bottom: 1px solid #F1F5F9 !important;
-    border-right: none !important;
+    border-bottom: 1px solid #E2E8F0 !important;
+    border-right: 1px solid #E2E8F0 !important;
     color: #334155;
 }}
 .custom-st-table.{uid} td:first-child {{
     text-align: left !important;
 }}
-.custom-st-table.{uid} th {{
-    /* Removed vertical lines */
-}}
 .custom-st-table.{uid} td:last-child, .custom-st-table.{uid} th:last-child {{
-    border-right: none;
-}}
-.custom-st-table.{uid} tr:nth-child(even) td {{
-    background-color: #ffffff;
+    border-right: none !important;
 }}
 .custom-st-table.{uid} tr:nth-child(odd) td {{
     background-color: #ffffff;
 }}
+.custom-st-table.{uid} tr:nth-child(even) td {{
+    background-color: #F8F9FA;
+}}
+.custom-st-table.{uid} tr:nth-child(odd) td:nth-child(even) {{
+    background-color: #F1F3F5;
+}}
+.custom-st-table.{uid} tr:nth-child(even) td:nth-child(even) {{
+    background-color: #E9ECEF;
+}}
 .custom-st-table.{uid} tr:hover td {{
-    background-color: #F8FAFC !important;
+    background-color: #E2E8F0 !important;
 }}
 {freeze_css}
 {custom_css.replace('{uid}', uid)}

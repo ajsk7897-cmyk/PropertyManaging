@@ -1536,16 +1536,14 @@ with tab_stacking_plan:
 
         # Get floors for this asset
         df_floors = fetch_data(
-            "SELECT floor, exclusive_area, bank_area FROM Asset_Area WHERE asset_name = %s",
+            f"SELECT floor, exclusive_area, bank_area FROM Asset_Area WHERE asset_name = '{sp_asset}'",
             _eng=engine
         )
-        df_floors = df_floors[df_floors['asset_name'] == sp_asset]
         
         df_leases_sp = fetch_data(
-            "SELECT floor, company_name, contract_area FROM Lease_Contracts WHERE asset_name = %s AND status = 'ACTIVE' AND start_date <= %s AND end_date >= %s",
+            f"SELECT floor, company_name, contract_area FROM Lease_Contracts WHERE asset_name = '{sp_asset}' AND status = 'ACTIVE' AND start_date <= '{today_str}' AND end_date >= '{today_str}'",
             _eng=engine
         )
-        df_leases_sp = df_leases_sp[df_leases_sp['asset_name'] == sp_asset]
 
         # Sort floors dynamically
         def floor_sort_key(f):

@@ -376,17 +376,43 @@ def send_email_with_attachment(to_email, subject, body, file_bytes, file_name, m
 
 
 
+# Constants for currency conversion (should be updated via API in production)
+CURRENCY_RATES = {
+    "USD_TO_KRW": 1400.0,  # TODO: Implement real-time exchange rate API
+    "PY_TO_SQM": 3.3058,
+    "PY_TO_SF": 35.5832
+}
+
 def get_scheduled_amount(rent_schedule_json, target_date, default_rent, default_maint, currency="KRW"):
     import json
     if rent_schedule_json:
         try:
             schedule = json.loads(rent_schedule_json)
+            # 스케줄을 시작일 기준으로 정렬하여 직전 단가를 유지할 수 있도록 함
+            schedule.sort(key=lambda x: pd.to_datetime(x["start_date"]))
+            
+            last_known_rent = default_rent
+            last_known_maint = default_maint
+            
             for period in schedule:
-                # Check if target_date falls within the period
-                s_date = pd.to_datetime(period["start_date"])
-                e_date = pd.to_datetime(period["end_date"])
-                if s_date.date() <= target_date.date() <= e_date.date():
+                s_date = pd.to_datetime(period["start_date"]).date()
+                e_date = pd.to_datetime(period["end_date"]).date()
+                t_date = target_date.date()
+                
+                # 타겟 날짜가 첫 스케줄 이전이면 default 반환
+                if t_date < s_date and last_known_rent == default_rent:
+                    return default_rent, default_maint
+                    
+                if s_date <= t_date <= e_date:
                     return float(period.get("rent", 0.0)), float(period.get("maint", 0.0))
+                
+                if t_date > e_date:
+                    # 타겟 날짜가 현재 기간 이후면, 직전 단가 갱신
+                    last_known_rent = float(period.get("rent", 0.0))
+                    last_known_maint = float(period.get("maint", 0.0))
+            
+            # 모든 스케줄을 확인했으나 타겟 날짜가 마지막 스케줄 이후인 경우 (Gap 방어)
+            return last_known_rent, last_known_maint
         except:
             pass
     return default_rent, default_maint
@@ -925,7 +951,7 @@ with tab_master_dashboard:
             def get_krw_val(row, col):
                 val = row[col] if pd.notnull(row[col]) else 0
                 if row.get("currency", "KRW") == "USD":
-                    return val * 1400
+                    return val * CURRENCY_RATES["USD_TO_KRW"]
                 return val
 
             active_leases["rent_krw"] = active_leases.apply(lambda r: get_krw_val(r, "monthly_rent"), axis=1)
@@ -1333,10 +1359,10 @@ with tab_asset_view:
 
         if unit_option == "㎡":
             for col in area_cols:
-                dashboard_df_conv[col] = (dashboard_df_conv[col] * 3.3058).round(2)
+                dashboard_df_conv[col] = (dashboard_df_conv[col] * CURRENCY_RATES["PY_TO_SQM"]).round(2)
         elif unit_option == "sqft":
             for col in area_cols:
-                dashboard_df_conv[col] = (dashboard_df_conv[col] * 35.58).round(2)
+                dashboard_df_conv[col] = (dashboard_df_conv[col] * CURRENCY_RATES["PY_TO_SF"]).round(2)
 
         csv_dash = generate_formatted_excel(dashboard_df_conv)
         file_name_dash = f"asset_total_dashboard_{unit_option}.xlsx"
@@ -1425,10 +1451,10 @@ with tab_asset_view:
 
         if unit_option == "㎡":
             for col in area_cols:
-                display_df_conv[col] = (display_df_conv[col] * 3.3058).round(2)
+                display_df_conv[col] = (display_df_conv[col] * CURRENCY_RATES["PY_TO_SQM"]).round(2)
         elif unit_option == "sqft":
             for col in area_cols:
-                display_df_conv[col] = (display_df_conv[col] * 35.58).round(2)
+                display_df_conv[col] = (display_df_conv[col] * CURRENCY_RATES["PY_TO_SF"]).round(2)
 
         csv = generate_formatted_excel(display_df_conv)
         file_name_1 = f"asset_area_status_{unit_option}.xlsx"
@@ -1504,17 +1530,22 @@ with tab_stacking_plan:
         )
         mult = 1.0
         if unit_sp == "㎡":
-            mult = 3.3058
+            mult = CURRENCY_RATES["PY_TO_SQM"]
         elif unit_sp == "sqft":
-            mult = 35.58
+            mult = CURRENCY_RATES["PY_TO_SF"]
 
         # Get floors for this asset
         df_floors = fetch_data(
-            f"SELECT floor, exclusive_area, bank_area FROM Asset_Area WHERE asset_name = '{sp_asset}'"
+            "SELECT floor, exclusive_area, bank_area FROM Asset_Area WHERE asset_name = %s",
+            _eng=engine
         )
+        df_floors = df_floors[df_floors['asset_name'] == sp_asset]
+        
         df_leases_sp = fetch_data(
-            f"SELECT floor, company_name, contract_area FROM Lease_Contracts WHERE asset_name = '{sp_asset}' AND status = 'ACTIVE' AND start_date <= '{today_str}' AND end_date >= '{today_str}'"
+            "SELECT floor, company_name, contract_area FROM Lease_Contracts WHERE asset_name = %s AND status = 'ACTIVE' AND start_date <= %s AND end_date >= %s",
+            _eng=engine
         )
+        df_leases_sp = df_leases_sp[df_leases_sp['asset_name'] == sp_asset]
 
         # Sort floors dynamically
         def floor_sort_key(f):
@@ -1931,32 +1962,36 @@ with tab_rent_roll:
                     rent_schedule_json = row.get("rent_schedule", None)
                     currency = row.get("currency", "KRW")
 
-                    # 7. 렌트롤 산출 시 rent_schedule 기반 연산 수행
-                    scheduled_rent, scheduled_maint = get_scheduled_amount(
-                        rent_schedule_json, 
-                        curr_month_start, 
-                        initial_rent, 
-                        initial_maint, 
-                        currency
-                    )
-
                     overlap_start = max(start, curr_month_start)
                     overlap_end = min(end, curr_month_end)
-
-                    is_rf = month_str in rf_details
-                    actual_rent_total = 0 if is_rf else scheduled_rent
-                    actual_maint_total = scheduled_maint
+                    
+                    rent_to_charge_total = 0.0
+                    maint_to_charge_total = 0.0
 
                     if overlap_start <= overlap_end:
-                        days_in_overlap = (overlap_end - overlap_start).days + 1
-                        if days_in_overlap < last_day:
-                            # 4. 명확한 일할 계산(Proration) 공식 주석 추가
-                            # (해당월 기준금액 / 해당월 총 일수) * 해당월 실제 계약일수
-                            rent_to_charge_total = (actual_rent_total / last_day) * days_in_overlap
-                            maint_to_charge_total = (actual_maint_total / last_day) * days_in_overlap
-                        else:
-                            rent_to_charge_total = actual_rent_total
-                            maint_to_charge_total = actual_maint_total
+                        # 일 단위(Daily Loop)로 쪼개어 계산
+                        current_day = overlap_start
+                        while current_day <= overlap_end:
+                            # 1. 해당 날짜 기준의 정확한 스케줄 단가 조회 (Step-up 반영)
+                            daily_rent_rate, daily_maint_rate = get_scheduled_amount(
+                                rent_schedule_json, 
+                                current_day, 
+                                initial_rent, 
+                                initial_maint, 
+                                currency
+                            )
+                            
+                            # 2. 해당 날짜가 속한 월이 Rent-Free 기간인지 판별
+                            is_rf = current_day.strftime("%Y-%m") in rf_details
+                            
+                            # 3. Rent-Free면 임대료 0원, 아니면 당일 일할 임대료 합산
+                            daily_rent = 0.0 if is_rf else (daily_rent_rate / last_day)
+                            daily_maint = (daily_maint_rate / last_day)
+                            
+                            rent_to_charge_total += daily_rent
+                            maint_to_charge_total += daily_maint
+                            
+                            current_day += timedelta(days=1)
                     else:
                         rent_to_charge_total = 0
                         maint_to_charge_total = 0

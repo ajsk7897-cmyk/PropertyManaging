@@ -1410,7 +1410,7 @@ with tab_asset_view:
             center_styler(dashboard_df_conv).format(
                 {c: "{:,.2f}" for c in area_cols + ["임대율 (%)"]}
             ),
-            custom_css=".custom-st-table.{uid} td:nth-child(1) { text-align: center !important; }"
+            custom_css=".custom-st-table.{uid} td, .custom-st-table.{uid} td:first-child { text-align: center !important; }"
         )
 
         st.markdown("---")
@@ -1503,7 +1503,7 @@ with tab_asset_view:
             center_styler(display_df_conv).format(
                 {c: "{:,.2f}" for c in area_cols + ["임대율 (%)"]}
             ),
-            custom_css=".custom-st-table.{uid} td:nth-child(1), .custom-st-table.{uid} td:nth-child(2) { text-align: center !important; }"
+            custom_css=".custom-st-table.{uid} td, .custom-st-table.{uid} td:first-child { text-align: center !important; }"
         )
     else:
         st.info(

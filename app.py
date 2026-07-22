@@ -383,39 +383,48 @@ CURRENCY_RATES = {
     "PY_TO_SF": 35.5832
 }
 
-def get_scheduled_amount(rent_schedule_json, target_date, default_rent, default_maint, currency="KRW"):
+# Performance: Cache rent schedule parsing
+@st.cache_data(ttl=1800, show_spinner=False)
+def _parse_rent_schedule(rent_schedule_json):
+    """Parse and sort rent schedule once"""
     import json
     if rent_schedule_json:
         try:
             schedule = json.loads(rent_schedule_json)
-            # 스케줄을 시작일 기준으로 정렬하여 직전 단가를 유지할 수 있도록 함
             schedule.sort(key=lambda x: pd.to_datetime(x["start_date"]))
-            
-            last_known_rent = default_rent
-            last_known_maint = default_maint
-            
-            for period in schedule:
-                s_date = pd.to_datetime(period["start_date"]).date()
-                e_date = pd.to_datetime(period["end_date"]).date()
-                t_date = target_date.date()
-                
-                # 타겟 날짜가 첫 스케줄 이전이면 default 반환
-                if t_date < s_date and last_known_rent == default_rent:
-                    return default_rent, default_maint
-                    
-                if s_date <= t_date <= e_date:
-                    return float(period.get("rent", 0.0)), float(period.get("maint", 0.0))
-                
-                if t_date > e_date:
-                    # 타겟 날짜가 현재 기간 이후면, 직전 단가 갱신
-                    last_known_rent = float(period.get("rent", 0.0))
-                    last_known_maint = float(period.get("maint", 0.0))
-            
-            # 모든 스케줄을 확인했으나 타겟 날짜가 마지막 스케줄 이후인 경우 (Gap 방어)
-            return last_known_rent, last_known_maint
+            return schedule
         except:
             pass
-    return default_rent, default_maint
+    return []
+
+
+def get_scheduled_amount(rent_schedule_json, target_date, default_rent, default_maint, currency="KRW"):
+    """Optimized: Use cached parsed schedule"""
+    schedule = _parse_rent_schedule(rent_schedule_json)
+    
+    if not schedule:
+        return default_rent, default_maint
+    
+    t_date = target_date.date()
+    
+    last_known_rent = default_rent
+    last_known_maint = default_maint
+    
+    for period in schedule:
+        s_date = pd.to_datetime(period["start_date"]).date()
+        e_date = pd.to_datetime(period["end_date"]).date()
+        
+        if t_date < s_date and last_known_rent == default_rent:
+            return default_rent, default_maint
+            
+        if s_date <= t_date <= e_date:
+            return float(period.get("rent", 0.0)), float(period.get("maint", 0.0))
+        
+        if t_date > e_date:
+            last_known_rent = float(period.get("rent", 0.0))
+            last_known_maint = float(period.get("maint", 0.0))
+    
+    return last_known_rent, last_known_maint
 
 
 def highlight_total_row(row):
@@ -1972,7 +1981,7 @@ with tab_rent_roll:
                     maint_to_charge_total = 0.0
 
                     if overlap_start <= overlap_end:
-                        # 일 단위(Daily Loop)로 쪼개어 계산
+                        # 일 단위(Daily Loop)로 쪼개어 계산 - 스케줄 파싱이 캐싱되어 성능 저하 없음
                         current_day = overlap_start
                         while current_day <= overlap_end:
                             # 1. 해당 날짜 기준의 정확한 스케줄 단가 조회 (Step-up 반영)
@@ -1985,9 +1994,9 @@ with tab_rent_roll:
                             )
                             
                             # 2. 해당 날짜가 속한 월이 Rent-Free 기간인지 판별
-                            is_rf = current_day.strftime("%Y-%m") in rf_details
+                            is_rf = current_day.strftime("%Y-%m") in (rf_details or [])
                             
-                            # 3. Rent-Free면 임대료 0원, 아니면 당일 일할 임대료 합산
+                            # 3. Rent-Free면 임대료 0원, 아니면 당일 일할 임대료 합산 (관리비는 정상 부과)
                             daily_rent = 0.0 if is_rf else (daily_rent_rate / last_day)
                             daily_maint = (daily_maint_rate / last_day)
                             

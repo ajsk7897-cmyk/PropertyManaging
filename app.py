@@ -552,13 +552,13 @@ body {{ margin: 0; font-family: 'Pretendard', 'Inter', sans-serif; -webkit-font-
 }}
 .custom-st-table.{uid} td {{
     padding: 0.75rem 1rem !important;
-    text-align: right !important;
+    text-align: center !important;
     border-bottom: 1px solid #E2E8F0 !important;
     border-right: 1px solid #E2E8F0 !important;
     color: #334155;
 }}
 .custom-st-table.{uid} td:first-child {{
-    text-align: left !important;
+    text-align: center !important;
 }}
 .custom-st-table.{uid} td:last-child, .custom-st-table.{uid} th:last-child {{
     border-right: none !important;
@@ -1409,8 +1409,7 @@ with tab_asset_view:
         display_styled_table(
             center_styler(dashboard_df_conv).format(
                 {c: "{:,.2f}" for c in area_cols + ["임대율 (%)"]}
-            ),
-            custom_css=".custom-st-table.{uid} td, .custom-st-table.{uid} td:first-child { text-align: center !important; }"
+            )
         )
 
         st.markdown("---")
@@ -1502,8 +1501,7 @@ with tab_asset_view:
         display_styled_table(
             center_styler(display_df_conv).format(
                 {c: "{:,.2f}" for c in area_cols + ["임대율 (%)"]}
-            ),
-            custom_css=".custom-st-table.{uid} td, .custom-st-table.{uid} td:first-child { text-align: center !important; }"
+            )
         )
     else:
         st.info(

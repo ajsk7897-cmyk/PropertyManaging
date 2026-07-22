@@ -2850,6 +2850,7 @@ with tab_contract_update:
                 floor_list = df_asset_options[
                     df_asset_options["asset_name"] == asset_name
                 ]["floor"].tolist()
+                floor_list = sorted(floor_list, key=get_floor_sort_key, reverse=True)
                 if contract_type == "단층 계약":
                     if update_mode == "🔄 계약 갱신":
                         floor_val = default_vals["floor"]

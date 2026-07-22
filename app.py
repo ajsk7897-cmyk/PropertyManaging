@@ -610,8 +610,10 @@ def init_db():
             PRIMARY KEY (asset_name, floor)
         )
     """)
+    conn.commit()
     try:
         c.execute("ALTER TABLE Asset_Area ADD COLUMN bank_area REAL DEFAULT 0.0")
+        conn.commit()
     except psycopg2.DatabaseError:
         conn.rollback()
         pass
@@ -656,9 +658,12 @@ def init_db():
                 c.execute(
                     "UPDATE Lease_Contracts SET status = 'ACTIVE' WHERE status IS NULL"
                 )
+            conn.commit()
         except psycopg2.DatabaseError:
             conn.rollback()
             pass  # Column already exists
+
+    conn.commit()
 
     c.execute("DROP TABLE IF EXISTS RentRoll_Overrides")
     c.execute("""
@@ -2744,7 +2749,8 @@ with tab_contract_update:
             "rent": 0,
             "maint": 0,
             "rf_details": [],
-            "floor_details": {}
+            "floor_details": {},
+            "remarks": ""
         }
 
         if update_mode in ["🔄 계약 갱신", "📝 기존 계약 수정"]:
@@ -2790,10 +2796,14 @@ with tab_contract_update:
                         pass
                 if row_sel.get("rent_schedule"):
                     default_vals["rent_schedule"] = row_sel["rent_schedule"]
+                if row_sel.get("remarks"):
+                    default_vals["remarks"] = row_sel["remarks"]
 
             default_vals["deposit"] = int(row_sel["deposit"])
             default_vals["rent"] = int(row_sel["monthly_rent"])
             default_vals["maint"] = int(row_sel["monthly_maintenance_fee"])
+
+        key_suffix = f"_{target_contract_id}" if update_mode != "✨ 신규 계약" else "_new"
 
         with st.container():
             st.markdown(
@@ -3005,7 +3015,7 @@ with tab_contract_update:
                 df_schedule,
                 num_rows="dynamic",
                 use_container_width=True,
-                key=f"rent_schedule_editor"
+                key=f"rent_schedule_editor{key_suffix}"
             )
             rent_schedule_json = edited_schedule_df.to_json(orient="records", force_ascii=False)
             
@@ -3023,12 +3033,13 @@ with tab_contract_update:
                 "렌트프리 적용 월 선택",
                 options=available_months,
                 default=valid_default_rf,
+                key=f"rf_months{key_suffix}"
             )
             total_rf_months = len(selected_rf_months)
 
             st.markdown("---")
             st.markdown("#### ✍️ 비고 사항")
-            remarks = st.text_area("특약 및 비고 사항을 입력하세요.")
+            remarks = st.text_area("특약 및 비고 사항을 입력하세요.", value=default_vals.get("remarks", ""), key=f"remarks{key_suffix}")
 
             st.markdown("---")
             send_email = st.checkbox(

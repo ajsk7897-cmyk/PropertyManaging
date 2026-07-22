@@ -1201,17 +1201,17 @@ with tab_asset_view:
         today_str = datetime.now().strftime("%Y-%m-%d")
         # 현재 활성화된 계약 면적 산출
         df_leases = fetch_data(
-            f"SELECT asset_name, floor, contract_area FROM Lease_Contracts WHERE start_date <= '{today_str}' AND end_date >= '{today_str}' AND status = 'ACTIVE'"
+            f"SELECT asset_name, floor, contract_exclusive_area FROM Lease_Contracts WHERE start_date <= '{today_str}' AND end_date >= '{today_str}' AND status = 'ACTIVE'"
         )
 
         if not df_leases.empty:
             leased_area_df = (
-                df_leases.groupby(["asset_name", "floor"])["contract_area"]
+                df_leases.groupby(["asset_name", "floor"])["contract_exclusive_area"]
                 .sum()
                 .reset_index()
             )
             leased_area_df.rename(
-                columns={"contract_area": "leased_area"}, inplace=True
+                columns={"contract_exclusive_area": "leased_area"}, inplace=True
             )
             display_df = pd.merge(
                 df_asset, leased_area_df, on=["asset_name", "floor"], how="left"
@@ -1409,7 +1409,8 @@ with tab_asset_view:
         display_styled_table(
             center_styler(dashboard_df_conv).format(
                 {c: "{:,.2f}" for c in area_cols + ["임대율 (%)"]}
-            )
+            ),
+            custom_css=".custom-st-table.{uid} td:nth-child(1) { text-align: center !important; }"
         )
 
         st.markdown("---")
@@ -1501,7 +1502,8 @@ with tab_asset_view:
         display_styled_table(
             center_styler(display_df_conv).format(
                 {c: "{:,.2f}" for c in area_cols + ["임대율 (%)"]}
-            )
+            ),
+            custom_css=".custom-st-table.{uid} td:nth-child(1), .custom-st-table.{uid} td:nth-child(2) { text-align: center !important; }"
         )
     else:
         st.info(

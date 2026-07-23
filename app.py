@@ -544,8 +544,8 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css=""):
         freeze_css = f"""
         .{uid} th:nth-child(1), .{uid} td:nth-child(1) {{ position: -webkit-sticky; position: sticky; left: 0; z-index: 5; min-width: 150px; max-width: 150px; border-right: 1px solid #E2E8F0 !important; text-align: center !important; }}
         .{uid} th:nth-child(2), .{uid} td:nth-child(2) {{ position: -webkit-sticky; position: sticky; left: 150px; z-index: 5; min-width: 100px; max-width: 100px; border-right: 1px solid #E2E8F0 !important; text-align: center !important; }}
-        .{uid} th:nth-child(3), .{uid} td:nth-child(3) {{ position: -webkit-sticky; position: sticky; left: 250px; z-index: 5; min-width: 200px; max-width: 200px; border-right: 1px solid #E2E8F0 !important; text-align: center !important; white-space: normal; word-break: break-all; }}
-        .{uid} th:nth-child(4), .{uid} td:nth-child(4) {{ position: -webkit-sticky; position: sticky; left: 450px; z-index: 5; min-width: 60px; max-width: 60px; border-right: 1px solid #E2E8F0 !important; text-align: center !important; }}
+        .{uid} th:nth-child(3), .{uid} td:nth-child(3) {{ position: -webkit-sticky; position: sticky; left: 250px; z-index: 5; min-width: 300px; max-width: 300px; border-right: 1px solid #E2E8F0 !important; text-align: center !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+        .{uid} th:nth-child(4), .{uid} td:nth-child(4) {{ position: -webkit-sticky; position: sticky; left: 550px; z-index: 5; min-width: 60px; max-width: 60px; border-right: 1px solid #E2E8F0 !important; text-align: center !important; }}
 
         .{uid} th:nth-child(-n+4) {{ z-index: 15; background-color: #F8FAFC !important; color: #334155 !important; font-weight: 600 !important; text-align: center !important; }}
         """

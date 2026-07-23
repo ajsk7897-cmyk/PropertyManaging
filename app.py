@@ -3197,8 +3197,8 @@ with tab_contract_update:
                     st.error("자산명, 층, 업체명을 모두 올바르게 입력해주세요.")
                 elif start_date > end_date:
                     st.error("종료일은 시작일보다 이후여야 합니다.")
-                elif contract_area <= 0:
-                    st.error("계약 면적이 0보다 커야 합니다.")
+                elif contract_area < 0:
+                    st.error("계약 면적은 0 이상이어야 합니다.")
                 else:
                     try:
                         db_conn = engine.raw_connection()

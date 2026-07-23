@@ -159,35 +159,53 @@ st.markdown(
     """
 <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap');
     
-    html, body, .stApp {
+    /* 1. 폰트 크기 및 스타일 일관성 확보 */
+    html, body, .stApp, p, span, div, li, td, th {
         font-family: 'Pretendard', 'Inter', 'Noto Sans KR', sans-serif;
         -webkit-font-smoothing: antialiased;
-    }
-    
-    .block-container {
-        padding-top: 2rem !important;
-    }
-    
-    .stApp {
-        background-color: #F8FAFC;
-    }
-    
-    html, body, p, span, div {
+        font-size: 13px !important;
         color: #334155;
     }
-
+    
     h1, h2, h3 {
         color: #1e293b;
         font-weight: 700 !important;
         letter-spacing: -0.5px;
+        margin-bottom: 0.5rem !important;
+        padding-bottom: 0.5rem !important;
     }
     
-    h1 {
-        padding-bottom: 1rem;
-        border-bottom: 2px solid #e2e8f0;
-        margin-bottom: 2rem;
+    h1 { font-size: 1.5rem !important; border-bottom: 2px solid #e2e8f0; }
+    h2 { font-size: 1.25rem !important; }
+    h3 { font-size: 1.1rem !important; }
+
+    /* 숫자/금액/날짜 데이터 고정폭 스타일 */
+    .stNumberInput input, 
+    [data-testid="stMetricValue"] div,
+    .custom-st-table td {
+        font-family: 'Pretendard', 'Roboto Mono', monospace !important;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* 2. 요소 간 여백(Margin/Padding) 최소화 */
+    .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 1.5rem !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        max-width: 98% !important; 
+    }
+    
+    .stApp { background-color: #F8FAFC; }
+
+    /* Streamlit 기본 갭(Gap) 강제 축소 */
+    [data-testid="stVerticalBlock"] > div {
+        gap: 0.5rem !important;
+    }
+    [data-testid="stHorizontalBlock"] {
+        gap: 0.5rem !important;
     }
     
     /* Buttons */
@@ -195,12 +213,15 @@ st.markdown(
         background: #ffffff;
         color: #334155 !important;
         border: 1px solid #CBD5E1;
-        border-radius: 6px;
-        padding: 0.4rem 1rem;
-        font-weight: 500;
-        font-size: 0.9rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        border-radius: 4px;
+        padding: 0.2rem 0.5rem !important;
+        font-weight: 600;
+        font-size: 12px !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
         transition: all 0.2s ease;
+        height: 32px !important;
+        line-height: 1 !important;
+        min-height: 32px !important;
     }
     
     .stButton>button:hover {
@@ -212,30 +233,41 @@ st.markdown(
     /* Cards and Containers */
     [data-testid="stVerticalBlockBorderWrapper"] {
         border: 1px solid #E2E8F0 !important;
-        border-radius: 8px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+        border-radius: 4px !important;
+        padding: 0.75rem !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
     }
     
+    /* Metrics - 컴팩트화 */
     [data-testid="metric-container"] {
         background-color: #ffffff;
         border: 1px solid #E2E8F0;
-        border-radius: 8px;
-        padding: 1.2rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        border-radius: 4px;
+        padding: 0.75rem !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        min-height: 80px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
     }
     [data-testid="stMetricValue"] > div {
         color: #005EB8 !important;
-        font-weight: 800 !important;
+        font-weight: 700 !important;
+        font-size: 1.2rem !important;
+        margin-top: 4px;
     }
     [data-testid="stMetricLabel"] > div {
         color: #64748b !important;
+        font-size: 12px !important;
+        white-space: nowrap !important;
     }
     
     .stAlert {
-        border-radius: 8px;
-        border: none;
+        border-radius: 4px;
+        border: 1px solid #E2E8F0;
         background-color: #ffffff;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        padding: 0.5rem 1rem !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
     }
     
     /* Tabs */
@@ -247,17 +279,19 @@ st.markdown(
     }
     
     .stTabs [data-baseweb="tab"] {
-        height: 48px;
-        padding-left: 16px;
-        padding-right: 16px;
+        height: 36px;
+        padding-left: 12px;
+        padding-right: 12px;
         white-space: nowrap !important;
         background-color: transparent;
         border-radius: 0;
         color: #64748B;
         font-weight: 500;
-        font-size: 14px !important;
+        font-size: 13px !important;
         border-bottom: 2px solid transparent;
-        transition: all 0.3s ease;
+        transition: all 0.2s ease;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
     }
     
     .stTabs [aria-selected="true"] {
@@ -266,16 +300,37 @@ st.markdown(
         border-bottom: 2px solid #005EB8 !important;
     }
 
-    /* Forms & Inputs */
+    /* 3. 엄격한 가로/세로 정렬(Alignment) 적용 */
     .stTextInput>div>div>input, 
     .stNumberInput>div>div>input, 
     .stSelectbox>div>div>div,
+    .stDateInput>div>div>input {
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+        box-shadow: none !important;
+        height: 32px !important;
+        min-height: 32px !important;
+        line-height: 32px !important;
+        font-size: 13px !important;
+        padding: 0 8px !important;
+    }
     .stTextArea>div>div>textarea {
         border: 1px solid #CBD5E1 !important;
-        border-radius: 6px;
-        transition: all 0.3s ease;
-        box-shadow: none !important;
+        border-radius: 4px;
+        font-size: 13px !important;
+        padding: 8px !important;
     }
+    
+    .stTextInput label, .stNumberInput label, .stSelectbox label, .stDateInput label, .stTextArea label {
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        margin-bottom: 2px !important;
+        color: #475569 !important;
+        min-height: 0 !important;
+        padding-bottom: 0 !important;
+    }
+
     .stTextInput>div>div>input:focus, 
     .stNumberInput>div>div>input:focus, 
     .stSelectbox>div>div>div:focus,
@@ -284,28 +339,24 @@ st.markdown(
         box-shadow: 0 0 0 1px #005EB8 !important;
     }
 
-.custom-st-table th:nth-child(1), .custom-st-table td:nth-child(1) {{
-    position: -webkit-sticky;
-    position: sticky;
-    left: 0;
-    z-index: 5;
-    background-color: white;
-    border-right: none !important;
-}}
-.custom-st-table th:nth-child(1) {
-    z-index: 15;
-    background-color: #F8FAFC !important;
-    color: #334155 !important;
-}
-.custom-st-table tr:hover td:nth-child(1) {
-    background-color: #f8fafc;
-}
+    .custom-st-table th:nth-child(1), .custom-st-table td:nth-child(1) {{
+        position: -webkit-sticky;
+        position: sticky;
+        left: 0;
+        z-index: 5;
+        background-color: white;
+        border-right: none !important;
+    }}
+    .custom-st-table th:nth-child(1) {
+        z-index: 15;
+        background-color: #F8FAFC !important;
+        color: #334155 !important;
+    }
+    .custom-st-table tr:hover td:nth-child(1) {
+        background-color: #f8fafc;
+    }
 
-    /* -------------------------------------------------------------------------- */
-    /* UI/UX 레이아웃 교정 (픽셀 매칭 및 줄바꿈 방지)                           */
-    /* -------------------------------------------------------------------------- */
-    
-    /* 1. 절대 줄바꿈 금지 (No-Wrap 강제) */
+    /* 절대 줄바꿈 금지 */
     .stButton>button, 
     [data-baseweb="tab"], 
     td, th, 
@@ -315,26 +366,6 @@ st.markdown(
         word-break: keep-all !important;
         text-overflow: ellipsis;
     }
-
-    /* 2. 입력창 및 버튼 규격(높이) 완벽 통일 */
-    .stTextInput input, 
-    .stNumberInput input, 
-    .stSelectbox div[data-baseweb="select"], 
-    .stButton button {
-        height: 42px !important;
-        line-height: 42px !important;
-        margin: 0 !important;
-    }
-
-    /* 3. 대시보드 메트릭 박스(KPI) 동일 높이화 */
-    [data-testid="metric-container"] {
-        min-height: 130px !important;
-        display: flex !important;
-        flex-direction: column !important;
-        justify-content: center !important;
-    }
-    /* -------------------------------------------------------------------------- */
-
 </style>
 """,
     unsafe_allow_html=True,
@@ -543,7 +574,9 @@ body {{ margin: 0; font-family: 'Pretendard', 'Inter', sans-serif; -webkit-font-
     width: 100%;
     border-collapse: collapse;
     background-color: white;
-    font-size: 0.95rem;
+    font-size: 13px;
+    font-family: 'Pretendard', 'Roboto Mono', monospace;
+    font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }}
 .custom-st-table.{uid} th {{
@@ -551,7 +584,7 @@ body {{ margin: 0; font-family: 'Pretendard', 'Inter', sans-serif; -webkit-font-
     color: #334155 !important;
     font-weight: 600 !important;
     text-align: center !important;
-    padding: 0.75rem 1rem !important;
+    padding: 0.4rem 0.5rem !important;
     border-bottom: 1px solid #E2E8F0 !important;
     border-right: 1px solid #E2E8F0 !important;
     position: -webkit-sticky;
@@ -560,7 +593,7 @@ body {{ margin: 0; font-family: 'Pretendard', 'Inter', sans-serif; -webkit-font-
     z-index: 10;
 }}
 .custom-st-table.{uid} td {{
-    padding: 0.75rem 1rem !important;
+    padding: 0.4rem 0.5rem !important;
     text-align: center !important;
     border-bottom: 1px solid #E2E8F0 !important;
     border-right: 1px solid #E2E8F0 !important;

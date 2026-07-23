@@ -2639,7 +2639,17 @@ with tab_contract_update:
                 int(sel.split("]")[0][1:]) for sel in selected_contract_strs
             ]
         else:
-            selected_contract_str = st.selectbox("적용할 기존 계약 선택", options)
+            selected_contract_str = st.selectbox(
+                "적용할 기존 계약 선택", 
+                options, 
+                index=None, 
+                placeholder="계약을 검색하거나 선택하세요"
+            )
+            
+            if not selected_contract_str:
+                st.info("👆 검색 창을 클릭하여 타이핑하거나 목록에서 계약을 선택해주세요.")
+                st.stop()
+                
             target_contract_id = int(selected_contract_str.split("]")[0][1:])
             row_sel = df_for_selection[
                 df_for_selection["contract_id"] == target_contract_id

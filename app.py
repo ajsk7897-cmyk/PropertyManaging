@@ -2014,29 +2014,49 @@ with tab_rent_roll:
                     maint_to_charge_total = 0.0
 
                     if overlap_start <= overlap_end:
-                        # 일 단위(Daily Loop)로 쪼개어 계산 - 스케줄 파싱이 캐싱되어 성능 저하 없음
-                        current_day = overlap_start
-                        while current_day <= overlap_end:
-                            # 1. 해당 날짜 기준의 정확한 스케줄 단가 조회 (Step-up 반영)
-                            daily_rent_rate, daily_maint_rate = get_scheduled_amount(
-                                rent_schedule_json, 
-                                current_day, 
-                                initial_rent, 
-                                initial_maint, 
-                                currency
-                            )
+                        # 1. 렌트프리 여부 판별 (월 1회만 수행)
+                        is_rf = month_str in (rf_details or [])
+                        
+                        # 2. 캐싱된 스케줄 배열 1회 로드
+                        schedule = _parse_rent_schedule(rent_schedule_json)
+                        
+                        if not schedule:
+                            overlap_days = (overlap_end - overlap_start).days + 1
+                            rent_to_charge_total = 0.0 if is_rf else (initial_rent * overlap_days / last_day)
+                            maint_to_charge_total = (initial_maint * overlap_days / last_day)
+                        else:
+                            # 3. 스케줄 구간(Chunk)별로 겹치는 일수만큼 연산 (Daily Loop 제거)
+                            c_start = overlap_start
+                            last_known_rent = initial_rent
+                            last_known_maint = initial_maint
                             
-                            # 2. 해당 날짜가 속한 월이 Rent-Free 기간인지 판별
-                            is_rf = current_day.strftime("%Y-%m") in (rf_details or [])
-                            
-                            # 3. Rent-Free면 임대료 0원, 아니면 당일 일할 임대료 합산 (관리비는 정상 부과)
-                            daily_rent = 0.0 if is_rf else (daily_rent_rate / last_day)
-                            daily_maint = (daily_maint_rate / last_day)
-                            
-                            rent_to_charge_total += daily_rent
-                            maint_to_charge_total += daily_maint
-                            
-                            current_day += timedelta(days=1)
+                            while c_start <= overlap_end:
+                                current_rent = last_known_rent
+                                current_maint = last_known_maint
+                                next_change_date = overlap_end + timedelta(days=1)
+                                
+                                for period in schedule:
+                                    s_date = pd.to_datetime(period["start_date"])
+                                    e_date = pd.to_datetime(period["end_date"])
+                                    
+                                    if s_date <= c_start <= e_date:
+                                        current_rent = float(period.get("rent", 0.0))
+                                        current_maint = float(period.get("maint", 0.0))
+                                        next_change_date = min(next_change_date, e_date + timedelta(days=1))
+                                        break
+                                    elif c_start < s_date:
+                                        next_change_date = min(next_change_date, s_date)
+                                    elif c_start > e_date:
+                                        last_known_rent = float(period.get("rent", 0.0))
+                                        last_known_maint = float(period.get("maint", 0.0))
+                                
+                                c_end = min(overlap_end, next_change_date - timedelta(days=1))
+                                days = (c_end - c_start).days + 1
+                                
+                                rent_to_charge_total += 0.0 if is_rf else (current_rent * days / last_day)
+                                maint_to_charge_total += (current_maint * days / last_day)
+                                
+                                c_start = c_end + timedelta(days=1)
                     else:
                         rent_to_charge_total = 0
                         maint_to_charge_total = 0

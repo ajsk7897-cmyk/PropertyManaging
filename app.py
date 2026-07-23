@@ -3060,6 +3060,15 @@ with tab_contract_update:
                 use_container_width=True,
                 key=f"rent_schedule_editor{key_suffix}"
             )
+            
+            # 입력 데이터 정제 로직 (날짜 8자리 입력 허용 및 빈 숫자 0 처리)
+            for col in ["start_date", "end_date"]:
+                if col in edited_schedule_df.columns:
+                    edited_schedule_df[col] = pd.to_datetime(edited_schedule_df[col].astype(str), errors='coerce').dt.strftime("%Y-%m-%d").fillna("")
+            for col in ["rent", "maint"]:
+                if col in edited_schedule_df.columns:
+                    edited_schedule_df[col] = pd.to_numeric(edited_schedule_df[col], errors='coerce').fillna(0.0)
+
             rent_schedule_json = edited_schedule_df.to_json(orient="records", force_ascii=False)
             
             escalation_cycle_years = 0

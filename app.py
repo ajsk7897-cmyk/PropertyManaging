@@ -2355,16 +2355,51 @@ with tab_rent_change:
     st.header("📉 임대료 및 관리비 변동 현황 (전월 대비)")
     
     today = datetime.now()
-    this_month = today.replace(day=1)
+    
+    col_y, col_m = st.columns([1, 1])
+    with col_y:
+        sel_year = st.selectbox(
+            "기준 연도", 
+            list(range(2024, 2031)), 
+            index=list(range(2024, 2031)).index(today.year) if today.year in range(2024, 2031) else 2, 
+            key="rc_year"
+        )
+    with col_m:
+        sel_month = st.selectbox(
+            "기준 월", 
+            list(range(1, 13)), 
+            index=today.month - 1, 
+            key="rc_month"
+        )
+        
+    this_month = datetime(sel_year, sel_month, 1)
     last_month = (this_month - timedelta(days=1)).replace(day=1)
+    
+    if this_month.month == 12:
+        this_month_end = datetime(this_month.year, 12, 31)
+    else:
+        this_month_end = datetime(this_month.year, this_month.month + 1, 1) - timedelta(days=1)
     
     st.markdown(f"**기준월**: {this_month.strftime('%Y년 %m월')} (비교: {last_month.strftime('%Y년 %m월')})")
     
-    df_contracts_active = fetch_data("SELECT * FROM Lease_Contracts WHERE status = 'ACTIVE'")
+    df_contracts_all = fetch_data("SELECT * FROM Lease_Contracts")
     
     change_records = []
-    if not df_contracts_active.empty:
-        for _, row in df_contracts_active.iterrows():
+    if not df_contracts_all.empty:
+        for _, row in df_contracts_all.iterrows():
+            start_date_str = row.get("start_date")
+            end_date_str = row.get("end_date")
+            
+            if pd.isna(start_date_str) or pd.isna(end_date_str) or not start_date_str or not end_date_str:
+                continue
+                
+            c_start = pd.to_datetime(start_date_str)
+            c_end = pd.to_datetime(end_date_str)
+            
+            # Check if contract was active during last_month or this_month
+            if c_start > this_month_end or c_end < last_month:
+                continue
+                
             cid = row["contract_id"]
             company = row["company_name"]
             asset = row["asset_name"]

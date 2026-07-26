@@ -442,8 +442,15 @@ def get_scheduled_amount(rent_schedule_json, target_date, default_rent, default_
     last_known_maint = default_maint
     
     for period in schedule:
-        s_date = pd.to_datetime(period["start_date"]).date()
-        e_date = pd.to_datetime(period["end_date"]).date()
+        try:
+            s_dt = pd.to_datetime(period.get("start_date"))
+            e_dt = pd.to_datetime(period.get("end_date"))
+            if pd.isna(s_dt) or pd.isna(e_dt):
+                continue
+            s_date = s_dt.date()
+            e_date = e_dt.date()
+        except Exception:
+            continue
         
         if t_date < s_date and last_known_rent == default_rent:
             return default_rent, default_maint

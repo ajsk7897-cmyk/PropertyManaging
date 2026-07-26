@@ -2447,16 +2447,22 @@ with tab_rent_change:
         df_changes = pd.DataFrame(change_records)
         df_changes = df_changes[["자산명", "층", "업체명", "기존 임대료", "변경 임대료", "기존 관리비", "변경 관리비", "변경 내용", "통화"]]
         
-        display_styled_table(df_changes, freeze_cols=1)
-        
         csv_changes = generate_formatted_excel(df_changes, [])
-        st.download_button(
-            label="📥 엑셀 다운로드",
-            data=csv_changes,
-            file_name=f"Rent_Changes_{today.strftime('%Y%m')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="download_rent_changes"
-        )
+        
+        col_c1, col_c2 = st.columns([7, 3], vertical_alignment="bottom")
+        with col_c1:
+            st.markdown("### 상세 변동 내역")
+        with col_c2:
+            st.download_button(
+                label="📥 엑셀 다운로드",
+                data=csv_changes,
+                file_name=f"Rent_Changes_{today.strftime('%Y%m')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_rent_changes",
+                use_container_width=True
+            )
+            
+        display_styled_table(df_changes, freeze_cols=1)
     else:
         st.info("이번 달 임대료 및 관리비 변동 내역이 없습니다.")
 

@@ -2405,19 +2405,7 @@ with tab_rent_change:
         df_changes = pd.DataFrame(change_records)
         df_changes = df_changes[["자산명", "층", "업체명", "기존 임대료", "변경 임대료", "기존 관리비", "변경 관리비", "변경 내용", "통화"]]
         
-        auto_format_change = {
-            "기존 임대료": format_money,
-            "변경 임대료": format_money,
-            "기존 관리비": format_money,
-            "변경 관리비": format_money,
-        }
-        styler_change = df_changes.style.format(auto_format_change)
-        
-        st.dataframe(
-            styler_change,
-            use_container_width=True,
-            height=500
-        )
+        display_styled_table(df_changes, freeze_cols=1)
         
         csv_changes = generate_formatted_excel(df_changes, [])
         st.download_button(

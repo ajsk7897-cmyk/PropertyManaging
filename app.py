@@ -479,6 +479,17 @@ def center_styler(df):
     return styler
 
 
+def format_money(x):
+    if pd.isna(x):
+        return ""
+    try:
+        val = float(x)
+        if abs(val) >= 1_000_000:
+            return f"{val/1_000_000:,.1f}백만"
+        return f"{val:,.0f}"
+    except:
+        return str(x)
+
 # Helper function to display styled table as HTML with scrolling
 def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css=""):
     import uuid
@@ -486,17 +497,6 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css=""):
 
     if hasattr(df, "data"):
         df = df.data
-
-    def format_money(x):
-        if pd.isna(x):
-            return ""
-        try:
-            val = float(x)
-            if abs(val) >= 1_000_000:
-                return f"{val/1_000_000:,.1f}백만"
-            return f"{val:,.0f}"
-        except:
-            return str(x)
 
     auto_format = {}
     for col in df.columns:

@@ -850,6 +850,7 @@ with st.sidebar:
     tab_stacking_plan,
     tab_lease_info,
     tab_rent_roll,
+    tab_rent_change,
     tab_asset_update,
     tab_contract_update,
     tab_history,
@@ -861,6 +862,7 @@ with st.sidebar:
         "🏢 스태킹 플랜",
         "📝 자산별 임대정보",
         "💰 렌트롤 (Rent Roll)",
+        "📉 임관리비 변동 현황",
         "✏️ 자산정보 업데이트",
         "✍️ 계약 업데이트",
         "🕒 업데이트 이력 관리",
@@ -2070,11 +2072,8 @@ with tab_rent_roll:
                         floor_rent = rent_to_charge_total
                         floor_maint = maint_to_charge_total
 
-                    # 1. 10원 미만 원단위 절사 (Round-down)
-                    if currency == "KRW":
-                        floor_rent = int(floor_rent // 10) * 10
-                        floor_maint = int(floor_maint // 10) * 10
-                    else:
+                    # 1. 원단위 유지 (이전의 10원 미만 절사 제거)
+                    if currency != "KRW":
                         floor_rent = round(floor_rent, 2)
                         floor_maint = round(floor_maint, 2)
 
@@ -2348,6 +2347,88 @@ with tab_rent_roll:
 
     else:
         st.info("해당 연도에 포함된 계약 정보가 없습니다.")
+
+# ==========================================
+# Tab: 임관리비 변동 현황
+# ==========================================
+with tab_rent_change:
+    st.header("📉 임대료 및 관리비 변동 현황 (전월 대비)")
+    
+    today = datetime.now()
+    this_month = today.replace(day=1)
+    last_month = (this_month - timedelta(days=1)).replace(day=1)
+    
+    st.markdown(f"**기준월**: {this_month.strftime('%Y년 %m월')} (비교: {last_month.strftime('%Y년 %m월')})")
+    
+    df_contracts_active = fetch_data("SELECT * FROM Lease_Contracts WHERE status = 'ACTIVE'")
+    
+    change_records = []
+    if not df_contracts_active.empty:
+        for _, row in df_contracts_active.iterrows():
+            cid = row["contract_id"]
+            company = row["company_name"]
+            asset = row["asset_name"]
+            floor = row["floor"]
+            currency = row.get("currency", "KRW")
+            if pd.isna(currency):
+                currency = "KRW"
+            
+            def_rent = float(row.get("monthly_rent", 0) if pd.notna(row.get("monthly_rent")) else 0)
+            def_maint = float(row.get("monthly_maintenance_fee", 0) if pd.notna(row.get("monthly_maintenance_fee")) else 0)
+            
+            rent_schedule = row.get("rent_schedule", "")
+            
+            last_rent, last_maint = get_scheduled_amount(rent_schedule, last_month, def_rent, def_maint, currency)
+            this_rent, this_maint = get_scheduled_amount(rent_schedule, this_month, def_rent, def_maint, currency)
+            
+            # 절사 로직 제외된 정확한 값으로 비교
+            if str(last_rent) != str(this_rent) or str(last_maint) != str(this_maint):
+                change_type = []
+                if last_rent != this_rent:
+                    change_type.append("임대료 인상" if this_rent > last_rent else "임대료 인하")
+                if last_maint != this_maint:
+                    change_type.append("관리비 인상" if this_maint > last_maint else "관리비 인하")
+                
+                change_records.append({
+                    "업체명": company,
+                    "자산명": asset,
+                    "층": floor,
+                    "기존 임대료": last_rent,
+                    "기존 관리비": last_maint,
+                    "변경 임대료": this_rent,
+                    "변경 관리비": this_maint,
+                    "변경 내용": ", ".join(change_type),
+                    "통화": currency
+                })
+    
+    if change_records:
+        df_changes = pd.DataFrame(change_records)
+        df_changes = df_changes[["자산명", "층", "업체명", "기존 임대료", "변경 임대료", "기존 관리비", "변경 관리비", "변경 내용", "통화"]]
+        
+        auto_format_change = {
+            "기존 임대료": format_money,
+            "변경 임대료": format_money,
+            "기존 관리비": format_money,
+            "변경 관리비": format_money,
+        }
+        styler_change = df_changes.style.format(auto_format_change)
+        
+        st.dataframe(
+            styler_change,
+            use_container_width=True,
+            height=500
+        )
+        
+        csv_changes = generate_formatted_excel(df_changes, [])
+        st.download_button(
+            label="📥 엑셀 다운로드",
+            data=csv_changes,
+            file_name=f"Rent_Changes_{today.strftime('%Y%m')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_rent_changes"
+        )
+    else:
+        st.info("이번 달 임대료 및 관리비 변동 내역이 없습니다.")
 
 # ==========================================
 # Tab 4: 자산정보 업데이트

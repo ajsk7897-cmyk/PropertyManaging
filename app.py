@@ -1267,17 +1267,17 @@ with tab_asset_view:
                     try:
                         details = json.loads(f_details)
                         for fl, fl_info in details.items():
-                            new_row = row.copy()
-                            new_row["floor"] = fl
+                            new_row = row.to_dict()
+                            new_row["floor"] = str(fl).strip()
                             if isinstance(fl_info, dict):
                                 new_row["contract_exclusive_area"] = float(fl_info.get("exclusive_area", 0.0))
                             else:
                                 new_row["contract_exclusive_area"] = float(fl_info)
                             expanded_rows.append(new_row)
                     except:
-                        expanded_rows.append(row)
+                        expanded_rows.append(row.to_dict())
                 else:
-                    expanded_rows.append(row)
+                    expanded_rows.append(row.to_dict())
                     
             if expanded_rows:
                 df_leases = pd.DataFrame(expanded_rows)
@@ -1642,17 +1642,17 @@ with tab_stacking_plan:
                     try:
                         details = json.loads(f_details)
                         for fl, fl_info in details.items():
-                            new_row = row.copy()
-                            new_row["floor"] = fl
+                            new_row = row.to_dict()
+                            new_row["floor"] = str(fl).strip()
                             if isinstance(fl_info, dict):
                                 new_row["contract_area"] = float(fl_info.get("area", 0.0))
                             else:
                                 new_row["contract_area"] = float(fl_info)
                             expanded_rows_sp.append(new_row)
                     except:
-                        expanded_rows_sp.append(row)
+                        expanded_rows_sp.append(row.to_dict())
                 else:
-                    expanded_rows_sp.append(row)
+                    expanded_rows_sp.append(row.to_dict())
             if expanded_rows_sp:
                 df_leases_sp = pd.DataFrame(expanded_rows_sp)
 

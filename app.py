@@ -1249,13 +1249,39 @@ with tab_asset_view:
         if selected_assets:
             df_asset = df_asset[df_asset["asset_name"].isin(selected_assets)]
 
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        target_date = st.date_input("조회 기준일 (면적 현황)", value=datetime.today().date(), key="target_date_asset_view")
+        today_str = target_date.strftime("%Y-%m-%d")
+
         # 현재 활성화된 계약 면적 산출
         df_leases = fetch_data(
-            f"SELECT asset_name, floor, contract_exclusive_area FROM Lease_Contracts WHERE start_date <= '{today_str}' AND end_date >= '{today_str}' AND status = 'ACTIVE'"
+            f"SELECT asset_name, floor, contract_exclusive_area, floor_details FROM Lease_Contracts WHERE start_date <= '{today_str}' AND end_date >= '{today_str}' AND status = 'ACTIVE'"
         )
 
         if not df_leases.empty:
+            # 복층 계약(다중 층) 데이터 분할 처리
+            expanded_rows = []
+            for _, row in df_leases.iterrows():
+                f_details = row.get("floor_details")
+                if pd.notna(f_details) and str(f_details).strip() and str(f_details).strip() != '{}':
+                    import json
+                    try:
+                        details = json.loads(f_details)
+                        for fl, fl_info in details.items():
+                            new_row = row.copy()
+                            new_row["floor"] = fl
+                            if isinstance(fl_info, dict):
+                                new_row["contract_exclusive_area"] = float(fl_info.get("exclusive_area", 0.0))
+                            else:
+                                new_row["contract_exclusive_area"] = float(fl_info)
+                            expanded_rows.append(new_row)
+                    except:
+                        expanded_rows.append(row)
+                else:
+                    expanded_rows.append(row)
+                    
+            if expanded_rows:
+                df_leases = pd.DataFrame(expanded_rows)
+
             leased_area_df = (
                 df_leases.groupby(["asset_name", "floor"])["contract_exclusive_area"]
                 .sum()
@@ -1578,12 +1604,18 @@ with tab_stacking_plan:
     sp_asset = st.selectbox("스태킹 플랜을 조회할 자산을 선택하세요", options=assets)
 
     if sp_asset:
-        unit_sp = st.radio(
-            "🔄 표출 면적 단위 선택",
-            ["평", "㎡", "sqft"],
-            horizontal=True,
-            key="sp_unit_radio",
-        )
+        col_sp1, col_sp2 = st.columns([1, 1])
+        with col_sp1:
+            unit_sp = st.radio(
+                "🔄 표출 면적 단위 선택",
+                ["평", "㎡", "sqft"],
+                horizontal=True,
+                key="sp_unit_radio",
+            )
+        with col_sp2:
+            target_date_sp = st.date_input("조회 기준일 (스태킹 플랜)", value=datetime.today().date(), key="target_date_stacking_plan")
+            today_str_sp = target_date_sp.strftime("%Y-%m-%d")
+
         mult = 1.0
         if unit_sp == "㎡":
             mult = CURRENCY_RATES["PY_TO_SQM"]
@@ -1597,9 +1629,32 @@ with tab_stacking_plan:
         )
         
         df_leases_sp = fetch_data(
-            f"SELECT floor, company_name, contract_area FROM Lease_Contracts WHERE asset_name = '{sp_asset}' AND status = 'ACTIVE' AND start_date <= '{today_str}' AND end_date >= '{today_str}'",
+            f"SELECT floor, company_name, contract_area, floor_details FROM Lease_Contracts WHERE asset_name = '{sp_asset}' AND status = 'ACTIVE' AND start_date <= '{today_str_sp}' AND end_date >= '{today_str_sp}'",
             _eng=engine
         )
+
+        if not df_leases_sp.empty:
+            expanded_rows_sp = []
+            for _, row in df_leases_sp.iterrows():
+                f_details = row.get("floor_details")
+                if pd.notna(f_details) and str(f_details).strip() and str(f_details).strip() != '{}':
+                    import json
+                    try:
+                        details = json.loads(f_details)
+                        for fl, fl_info in details.items():
+                            new_row = row.copy()
+                            new_row["floor"] = fl
+                            if isinstance(fl_info, dict):
+                                new_row["contract_area"] = float(fl_info.get("area", 0.0))
+                            else:
+                                new_row["contract_area"] = float(fl_info)
+                            expanded_rows_sp.append(new_row)
+                    except:
+                        expanded_rows_sp.append(row)
+                else:
+                    expanded_rows_sp.append(row)
+            if expanded_rows_sp:
+                df_leases_sp = pd.DataFrame(expanded_rows_sp)
 
         # Sort floors dynamically
         def floor_sort_key(f):

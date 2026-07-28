@@ -1106,7 +1106,7 @@ with tab_master_dashboard:
                             yaxis=dict(showgrid=True, gridcolor="#F1F5F9", zeroline=False),
                             showlegend=False
                         )
-                        fig_exp.update_traces(texttemplate='%{y:,.0f}', textposition='outside')
+                        fig_exp.update_traces(texttemplate='%{y:,.0f}', textposition='outside', textfont_size=16)
                         st.plotly_chart(fig_exp, use_container_width=True)
                     else:
                         st.info("향후 5년 내 만기 도래 계약 없음")
@@ -1154,7 +1154,7 @@ with tab_master_dashboard:
                     showlegend=True,
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
-                fig_bar2.update_traces(texttemplate='₩ %{y:,.0f}', textposition='outside')
+                fig_bar2.update_traces(texttemplate='₩ %{y:,.0f}', textposition='outside', textfont_size=16)
                 st.plotly_chart(fig_bar2, use_container_width=True)
             else:
                 st.info("데이터 없음")
@@ -1198,7 +1198,7 @@ with tab_market_research:
             with st.container(border=True):
                 st.markdown("#### 상권별 평균 평당 임대료")
                 fig_rent = px.bar(agg_df, x="세부 상권명", y="평당 임대료")
-                fig_rent.update_traces(marker_color="#005EB8", texttemplate='₩ %{y:,.0f}', textposition='outside')
+                fig_rent.update_traces(marker_color="#005EB8", texttemplate='₩ %{y:,.0f}', textposition='outside', textfont_size=16)
                 fig_rent.update_layout(
                     margin=dict(l=0, r=0, t=30, b=0),
                     plot_bgcolor='rgba(0,0,0,0)',
@@ -1212,7 +1212,7 @@ with tab_market_research:
             with st.container(border=True):
                 st.markdown("#### 상권별 평균 공실률 (%)")
                 fig_vac = px.bar(agg_df, x="세부 상권명", y="공실률(%)")
-                fig_vac.update_traces(marker_color="#00A546", texttemplate='%{y:.1f}%', textposition='outside')
+                fig_vac.update_traces(marker_color="#00A546", texttemplate='%{y:.1f}%', textposition='outside', textfont_size=16)
                 fig_vac.update_layout(
                     margin=dict(l=0, r=0, t=30, b=0),
                     plot_bgcolor='rgba(0,0,0,0)',

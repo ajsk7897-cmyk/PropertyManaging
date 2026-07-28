@@ -1254,7 +1254,7 @@ with tab_asset_view:
 
         # 현재 활성화된 계약 면적 산출
         df_leases = fetch_data(
-            f"SELECT asset_name, floor, contract_exclusive_area, floor_details FROM Lease_Contracts WHERE start_date <= '{today_str}' AND end_date >= '{today_str}' AND status = 'ACTIVE'"
+            f"SELECT asset_name, floor, contract_exclusive_area, floor_details FROM Lease_Contracts WHERE start_date <= '{today_str}' AND end_date >= '{today_str}'"
         )
 
         if not df_leases.empty:
@@ -1629,7 +1629,7 @@ with tab_stacking_plan:
         )
         
         df_leases_sp = fetch_data(
-            f"SELECT floor, company_name, contract_area, floor_details FROM Lease_Contracts WHERE asset_name = '{sp_asset}' AND status = 'ACTIVE' AND start_date <= '{today_str_sp}' AND end_date >= '{today_str_sp}'",
+            f"SELECT floor, company_name, contract_area, floor_details FROM Lease_Contracts WHERE asset_name = '{sp_asset}' AND start_date <= '{today_str_sp}' AND end_date >= '{today_str_sp}'",
             _eng=engine
         )
 
@@ -3864,7 +3864,7 @@ with tab_contract_update:
                                 remarks = ""
 
                             floor_details_dict = {
-                                floor_str: {"area": c_area, "ratio": 1.0}
+                                floor_str: {"area": c_area, "exclusive_area": e_area, "ratio": 1.0}
                             }
                             floor_details_json = json.dumps(
                                 floor_details_dict, ensure_ascii=False

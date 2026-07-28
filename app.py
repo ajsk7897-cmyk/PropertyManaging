@@ -1629,7 +1629,7 @@ with tab_stacking_plan:
         )
         
         df_leases_sp = fetch_data(
-            f"SELECT floor, company_name, contract_area, floor_details FROM Lease_Contracts WHERE asset_name = '{sp_asset}' AND start_date <= '{today_str_sp}' AND end_date >= '{today_str_sp}'",
+            f"SELECT floor, company_name, contract_exclusive_area, floor_details FROM Lease_Contracts WHERE asset_name = '{sp_asset}' AND start_date <= '{today_str_sp}' AND end_date >= '{today_str_sp}'",
             _eng=engine
         )
 
@@ -1645,9 +1645,9 @@ with tab_stacking_plan:
                             new_row = row.to_dict()
                             new_row["floor"] = str(fl).strip()
                             if isinstance(fl_info, dict):
-                                new_row["contract_area"] = float(fl_info.get("area", 0.0))
+                                new_row["contract_exclusive_area"] = float(fl_info.get("exclusive_area", 0.0))
                             else:
-                                new_row["contract_area"] = float(fl_info)
+                                new_row["contract_exclusive_area"] = float(fl_info)
                             expanded_rows_sp.append(new_row)
                     except:
                         expanded_rows_sp.append(row.to_dict())
@@ -1685,21 +1685,22 @@ with tab_stacking_plan:
 
             # Find tenants on this floor
             floor_leases = df_leases_sp[df_leases_sp["floor"] == floor_name].copy()
-            floor_leases["contract_area"] = floor_leases["contract_area"] * mult
+            if "contract_exclusive_area" in floor_leases.columns:
+                floor_leases["contract_exclusive_area"] = floor_leases["contract_exclusive_area"] * mult
 
             blocks_html = ""
 
             # Bank block
             if bank_area > 0:
                 flex_val = max(0.1, bank_area)
-                blocks_html += f"<div title='은행/지점&#10;면적: {bank_area:.1f} {unit_sp}' style='flex: {flex_val}; background-color: #005EB8; color: white; padding: 10px; margin: 2px; border-radius: 4px; text-align: center; min-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'><b>은행/지점</b><br>{bank_area:.1f}</div>"
+                blocks_html += f"<div title='은행/지점&#10;전용면적: {bank_area:.1f} {unit_sp}' style='flex: {flex_val}; background-color: #005EB8; color: white; padding: 10px; margin: 2px; border-radius: 4px; text-align: center; min-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'><b>은행/지점</b><br>{bank_area:.1f}</div>"
 
             leased_total = 0.0
             for _, l_row in floor_leases.iterrows():
                 comp = l_row["company_name"]
                 area = (
-                    float(l_row["contract_area"])
-                    if not pd.isna(l_row["contract_area"])
+                    float(l_row["contract_exclusive_area"])
+                    if "contract_exclusive_area" in l_row and not pd.isna(l_row["contract_exclusive_area"])
                     else 0.0
                 )
                 leased_total += area
@@ -1713,7 +1714,7 @@ with tab_stacking_plan:
 
                 if area > 0:
                     flex_val = max(0.1, area)
-                    blocks_html += f"<div title='임차사: {comp}&#10;면적: {area:.1f} {unit_sp}' style='flex: {flex_val}; background-color: {bg_color}; color: {text_color}; padding: 10px; margin: 2px; border-radius: 4px; text-align: center; min-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'><b>{comp}</b><br>{area:.1f}</div>"
+                    blocks_html += f"<div title='임차사: {comp}&#10;전용면적: {area:.1f} {unit_sp}' style='flex: {flex_val}; background-color: {bg_color}; color: {text_color}; padding: 10px; margin: 2px; border-radius: 4px; text-align: center; min-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'><b>{comp}</b><br>{area:.1f}</div>"
 
             vacant = float(exclusive) - float(bank_area) - leased_total
             if pd.isna(vacant):
@@ -1721,7 +1722,7 @@ with tab_stacking_plan:
 
             if vacant > 0.1:
                 flex_val = max(0.1, vacant)
-                blocks_html += f"<div title='공실&#10;면적: {vacant:.1f} {unit_sp}' style='flex: {flex_val}; background-color: #9ca3af; color: white; padding: 10px; margin: 2px; border-radius: 4px; text-align: center; min-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'><b>공실</b><br>{vacant:.1f}</div>"
+                blocks_html += f"<div title='공실&#10;전용면적: {vacant:.1f} {unit_sp}' style='flex: {flex_val}; background-color: #9ca3af; color: white; padding: 10px; margin: 2px; border-radius: 4px; text-align: center; min-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'><b>공실</b><br>{vacant:.1f}</div>"
 
             if blocks_html == "":
                 # 면적이 0이거나 데이터가 없는 층 (RF 등)

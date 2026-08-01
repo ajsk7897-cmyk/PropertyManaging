@@ -54,13 +54,13 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
             if target_cell and num_format:
                 target_cell.number_format = num_format
 
-    def format_money(val):
-        if val is None or str(val).strip() == "":
-            return ""
+    def get_money(val):
+        if val is None or str(val).strip() == "" or str(val).lower() == "none":
+            return 0
         try:
-            return f"{int(val):,}"
+            return math.floor(float(val) / 10) * 10
         except (ValueError, TypeError):
-            return val
+            return 0
 
     old_gross_py = float(old_data.get('기존_총임대면적_평') or 0)
     old_exc_py = float(old_data.get('기존_전용면적_평') or 0)
@@ -78,7 +78,6 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
     try:
         dt_start = datetime.datetime.strptime(new_start_str, "%Y-%m-%d").date()
         dt_end = datetime.datetime.strptime(new_end_str, "%Y-%m-%d").date()
-        # Calculate months and round down (절사)
         renewal_months = math.floor((dt_end - dt_start).days / 365 * 12)
     except Exception:
         pass
@@ -91,23 +90,23 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
     set_value('임대갱신품의서', 'D8', safe_str(new_data.get('대리인명')))
     set_value('임대갱신품의서', 'K8', safe_str(new_data.get('임대층')))
 
-    set_value('임대갱신품의서', 'D11', old_gross_py if old_gross_py else "")
-    set_value('임대갱신품의서', 'K11', old_exc_py if old_exc_py else "")
-    set_value('임대갱신품의서', 'D12', py_to_sqm(old_gross_py) if old_gross_py else "")
-    set_value('임대갱신품의서', 'K12', py_to_sqm(old_exc_py) if old_exc_py else "")
-    set_value('임대갱신품의서', 'D13', py_to_sf(old_gross_py) if old_gross_py else "")
-    set_value('임대갱신품의서', 'K13', py_to_sf(old_exc_py) if old_exc_py else "")
+    set_value('임대갱신품의서', 'D11', old_gross_py if old_gross_py else "", num_format='#,##0.00')
+    set_value('임대갱신품의서', 'K11', old_exc_py if old_exc_py else "", num_format='#,##0.00')
+    set_value('임대갱신품의서', 'D12', py_to_sqm(old_gross_py) if old_gross_py else "", num_format='#,##0.00')
+    set_value('임대갱신품의서', 'K12', py_to_sqm(old_exc_py) if old_exc_py else "", num_format='#,##0.00')
+    set_value('임대갱신품의서', 'D13', py_to_sf(old_gross_py) if old_gross_py else "", num_format='#,##0.00')
+    set_value('임대갱신품의서', 'K13', py_to_sf(old_exc_py) if old_exc_py else "", num_format='#,##0.00')
     
-    old_rent = int(old_data.get('기존_월임대료') or 0)
-    old_maint = int(old_data.get('기존_월관리비') or 0)
-    old_dep = int(old_data.get('기존_보증금') or 0)
-    new_rent = int(new_data.get('갱신_월임대료') or 0)
-    new_maint = int(new_data.get('갱신_월관리비') or 0)
-    new_dep = int(new_data.get('갱신_보증금') or 0)
+    old_rent = get_money(old_data.get('기존_월임대료'))
+    old_maint = get_money(old_data.get('기존_월관리비'))
+    old_dep = get_money(old_data.get('기존_보증금'))
+    new_rent = get_money(new_data.get('갱신_월임대료'))
+    new_maint = get_money(new_data.get('갱신_월관리비'))
+    new_dep = get_money(new_data.get('갱신_보증금'))
 
-    set_value('임대갱신품의서', 'D14', format_money(old_rent))
-    set_value('임대갱신품의서', 'K14', format_money(old_maint))
-    set_value('임대갱신품의서', 'D15', format_money(old_dep))
+    set_value('임대갱신품의서', 'D14', old_rent, num_format='#,##0')
+    set_value('임대갱신품의서', 'K14', old_maint, num_format='#,##0')
+    set_value('임대갱신품의서', 'D15', old_dep, num_format='#,##0')
 
     # [수정 1] 계약 개월 수 (절사된 정수)
     set_value('임대갱신품의서', 'D18', f"{renewal_months}개월" if renewal_months > 0 else "")
@@ -126,16 +125,19 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
     else:
         set_value('임대갱신품의서', 'D22', new_start_str)
 
-    set_value('임대갱신품의서', 'D19', new_gross_py if new_gross_py else "")
-    set_value('임대갱신품의서', 'J18', new_exc_py if new_exc_py else "")
-    set_value('임대갱신품의서', 'J19', new_maint)
-    set_value('임대갱신품의서', 'D20', new_rent)
-    set_value('임대갱신품의서', 'D21', new_dep)
+    set_value('임대갱신품의서', 'D19', new_gross_py if new_gross_py else "", num_format='#,##0.00')
+    set_value('임대갱신품의서', 'J18', new_exc_py if new_exc_py else "", num_format='#,##0.00')
+    set_value('임대갱신품의서', 'J19', new_maint, num_format='#,##0')
+    set_value('임대갱신품의서', 'D20', new_rent, num_format='#,##0')
+    set_value('임대갱신품의서', 'D21', new_dep, num_format='#,##0')
 
-    # [수정 3] 고정 재무 지표 수식 적용 (J22, D25, G27)
-    set_value('임대갱신품의서', 'J22', '=(D21*J20)/12+D20+J19')
-    set_value('임대갱신품의서', 'D25', '=(D21*J20)+(D20*12)+(J19*12)')
-    set_value('임대갱신품의서', 'G27', '=(D21*J20)/2+(D20*6)+(J19*6)')
+    set_value('임대갱신품의서', 'A17', '▲ Renewal Proposal 갱신 조건')
+
+    # [수정 3] 고정 재무 지표 수식 적용 (D25, J25, G27)
+    set_value('임대갱신품의서', 'J22', '=(D21*J20)/12+D20+J19', num_format='#,##0')
+    set_value('임대갱신품의서', 'D25', '=(D15*J20)+(D14*12)+(K14*12)', num_format='#,##0')
+    set_value('임대갱신품의서', 'J25', '=(D21*J20)+(D20*12)+(J19*12)', num_format='#,##0')
+    set_value('임대갱신품의서', 'G27', '=(D21*J20)/2+(D20*6)+(J19*6)', num_format='#,##0')
 
     # C34 : 작업대산 계약이 속한 자산의 건물 전체의 평균 평당 관리비
     total_maint_per_py = 0
@@ -154,7 +156,7 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
                 count_contracts += 1
                 
     avg_maint_per_py = total_maint_per_py / count_contracts if count_contracts > 0 else 0
-    set_value('임대갱신품의서', 'C34', format_money(int(avg_maint_per_py)))
+    set_value('임대갱신품의서', 'C34', get_money(avg_maint_per_py), num_format='#,##0')
 
     # A38 : 지정된 텍스트 입력
     a38_text = f"""[계약 명]
@@ -179,17 +181,17 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
     set_value('비교표', 'A2', safe_str(new_data.get('임차인명')))
     set_value('비교표', 'J10', f"{renewal_months}개월" if renewal_months > 0 else "")
 
-    set_value('비교표', 'D4', py_to_sf(old_exc_py) if old_exc_py else "")
-    set_value('비교표', 'G4', "좌동" if old_exc_py == new_exc_py else py_to_sf(new_exc_py))
+    set_value('비교표', 'D4', py_to_sf(old_exc_py) if old_exc_py else "", num_format='#,##0.00')
+    set_value('비교표', 'G4', "좌동" if old_exc_py == new_exc_py else py_to_sf(new_exc_py), num_format=None if old_exc_py == new_exc_py else '#,##0.00')
     
-    set_value('비교표', 'D5', py_to_sf(old_gross_py) if old_gross_py else "")
-    set_value('비교표', 'G5', "좌동" if old_gross_py == new_gross_py else py_to_sf(new_gross_py))
+    set_value('비교표', 'D5', py_to_sf(old_gross_py) if old_gross_py else "", num_format='#,##0.00')
+    set_value('비교표', 'G5', "좌동" if old_gross_py == new_gross_py else py_to_sf(new_gross_py), num_format=None if old_gross_py == new_gross_py else '#,##0.00')
     
     set_value('비교표', 'D6', safe_str(new_data.get('임차인명')))
     set_value('비교표', 'G6', "좌동")
     
-    set_value('비교표', 'D7', format_money(old_dep))
-    set_value('비교표', 'G7', "좌동" if old_dep == new_dep else format_money(new_dep))
+    set_value('비교표', 'D7', old_dep, num_format='#,##0')
+    set_value('비교표', 'G7', "좌동" if old_dep == new_dep else new_dep, num_format=None if old_dep == new_dep else '#,##0')
     set_value('비교표', 'K7', safe_str(new_data.get('보증금비고')))
     
     rent_inc_str = ""
@@ -197,8 +199,8 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
         inc_pct = ((new_rent - old_rent) / old_rent) * 100
         rent_inc_str = f"{inc_pct:.1f}% 인상" if inc_pct > 0 else f"{abs(inc_pct):.1f}% 인하"
         
-    set_value('비교표', 'D8', format_money(old_rent))
-    set_value('비교표', 'G8', "좌동" if old_rent == new_rent else format_money(new_rent))
+    set_value('비교표', 'D8', old_rent, num_format='#,##0')
+    set_value('비교표', 'G8', "좌동" if old_rent == new_rent else new_rent, num_format=None if old_rent == new_rent else '#,##0')
     set_value('비교표', 'K8', rent_inc_str if rent_inc_str else safe_str(new_data.get('임대료비고')))
     
     maint_inc_str = ""
@@ -206,8 +208,8 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
         inc_pct = ((new_maint - old_maint) / old_maint) * 100
         maint_inc_str = f"{inc_pct:.1f}% 인상" if inc_pct > 0 else f"{abs(inc_pct):.1f}% 인하"
         
-    set_value('비교표', 'D9', format_money(old_maint))
-    set_value('비교표', 'G9', "좌동" if old_maint == new_maint else format_money(new_maint))
+    set_value('비교표', 'D9', old_maint, num_format='#,##0')
+    set_value('비교표', 'G9', "좌동" if old_maint == new_maint else new_maint, num_format=None if old_maint == new_maint else '#,##0')
     set_value('비교표', 'K9', maint_inc_str if maint_inc_str else safe_str(new_data.get('관리비비고')))
     
     old_term = safe_str(old_data.get('기존_임대차기간'))
@@ -242,11 +244,11 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
 
         # Write text and values
         set_value('비교표', f"{target_col}13", f"{y}년 차")
-        set_value('비교표', f"{target_col}14", new_dep)
-        set_value('비교표', f"{target_col}15", y_rent_annual)
-        set_value('비교표', f"{target_col}16", y_maint_annual)
-        set_value('비교표', f"{target_col}17", f"={target_col}14*임대갱신품의서!J20")
-        set_value('비교표', f"{target_col}18", f"=SUM({target_col}15:{target_col}17)")
+        set_value('비교표', f"{target_col}14", new_dep, num_format='#,##0')
+        set_value('비교표', f"{target_col}15", y_rent_annual, num_format='#,##0')
+        set_value('비교표', f"{target_col}16", y_maint_annual, num_format='#,##0')
+        set_value('비교표', f"{target_col}17", f"={target_col}14*임대갱신품의서!J20", num_format='#,##0')
+        set_value('비교표', f"{target_col}18", f"=SUM({target_col}15:{target_col}17)", num_format='#,##0')
         
         # If y > 2, we must copy styles from 2nd year (col G)
         if y > 2:
@@ -279,15 +281,15 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
         else:
             # SUM range: D15:M15 (for 3 years)
             end_sum_col = get_column_letter(total_col_idx - col_spacing)
-            set_value('비교표', f"{total_col}{row}", f"=SUM(D{row}:{end_sum_col}{row})")
+            set_value('비교표', f"{total_col}{row}", f"=SUM(D{row}:{end_sum_col}{row})", num_format='#,##0')
 
     # [비교 사례(Comps) 평단가 자동 추출] - 부가세 제외, 총 임대면적 기준
     # C31 ~ C35 계산 (임대갱신품의서 쪽에 적용? 아 사용자가 비교사례 파트 C31이라고 함. 임대갱신품의서 시트의 C31을 의미하는듯.)
     if new_gross_py > 0:
-        set_value('임대갱신품의서', 'C31', new_dep / new_gross_py)
-        set_value('임대갱신품의서', 'C32', new_rent / new_gross_py)
-        set_value('임대갱신품의서', 'C33', new_maint / new_gross_py)
-        set_value('임대갱신품의서', 'C35', (new_rent * 100 + new_dep) / new_gross_py)
+        set_value('임대갱신품의서', 'C31', new_dep / new_gross_py, num_format='#,##0')
+        set_value('임대갱신품의서', 'C32', new_rent / new_gross_py, num_format='#,##0')
+        set_value('임대갱신품의서', 'C33', new_maint / new_gross_py, num_format='#,##0')
+        set_value('임대갱신품의서', 'C35', (new_rent * 100 + new_dep) / new_gross_py, num_format='#,##0')
 
     if comps_list and len(comps_list) > 0 and new_gross_py > 0:
         target_rent_per_py = new_rent / new_gross_py
@@ -318,9 +320,9 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
             maint_per_py = float(comp.get('monthly_maintenance_fee', 0)) / comp_area
             
             set_value('비교표', f'{col}{row_floor}', safe_str(comp.get('floor')))
-            set_value('비교표', f'{col}{row_dep_py}', format_money(int(dep_per_py)))
-            set_value('비교표', f'{col}{row_rent_py}', format_money(int(rent_per_py)))
-            set_value('비교표', f'{col}{row_maint_py}', format_money(int(maint_per_py)))
+            set_value('비교표', f'{col}{row_dep_py}', get_money(dep_per_py), num_format='#,##0')
+            set_value('비교표', f'{col}{row_rent_py}', get_money(rent_per_py), num_format='#,##0')
+            set_value('비교표', f'{col}{row_maint_py}', get_money(maint_per_py), num_format='#,##0')
 
     output = io.BytesIO()
     wb.save(output)

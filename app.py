@@ -4028,7 +4028,7 @@ with tab_history:
             st.markdown("---")
             st.markdown("#### 📄 갱신 이력 기안서류(Lease Renewal Proposal) 재출력")
             renewal_opts = renewals.apply(
-                lambda x: f"[{x['이력ID']}] {x['자산명']} {x['층']} - {x['업체명']} ({x['발생일']})",
+                lambda x: f"[{x['이력ID']}] {x['자산명'] if pd.notna(x['자산명']) else '자산명 없음'} {x['층'] if pd.notna(x['층']) else ''} - {x['업체명'] if pd.notna(x['업체명']) else '업체명 없음'} ({x['발생일']})",
                 axis=1,
             ).tolist()
             sel_hist_str = st.selectbox("다운로드할 갱신 이력 선택", renewal_opts)
@@ -4038,16 +4038,16 @@ with tab_history:
                     db_conn = engine.raw_connection()
                     try:
                         c = db_conn.cursor()
-                        new_contract_id = int(
-                            c.execute(
-                                "SELECT contract_id FROM Contract_History WHERE history_id = %s",
-                                (hist_id,),
-                            ).fetchone()[0]
+                        c.execute(
+                            "SELECT contract_id FROM Contract_History WHERE history_id = %s",
+                            (hist_id,),
                         )
-                        details_str = c.execute(
+                        new_contract_id = int(c.fetchone()[0])
+                        c.execute(
                             "SELECT details FROM Contract_History WHERE history_id = %s",
                             (hist_id,),
-                        ).fetchone()[0]
+                        )
+                        details_str = c.fetchone()[0]
                         details_json = json.loads(details_str) if details_str else {}
                         old_contract_id = details_json.get("이전계약ID")
                     finally:

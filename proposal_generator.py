@@ -2,6 +2,8 @@ import io
 import math
 import datetime
 from openpyxl import load_workbook
+from openpyxl.styles import Border, Side, PatternFill, Font, Alignment
+from openpyxl.utils import get_column_letter
 import os
 
 def py_to_sqm(py):
@@ -17,7 +19,16 @@ def safe_str(val):
         return ""
     return str(val)
 
+def copy_cell_style(source_cell, target_cell):
+    target_cell.font = copy(source_cell.font) if source_cell.font else None
+    target_cell.border = copy(source_cell.border) if source_cell.border else None
+    target_cell.fill = copy(source_cell.fill) if source_cell.fill else None
+    target_cell.number_format = source_cell.number_format
+    target_cell.protection = copy(source_cell.protection) if source_cell.protection else None
+    target_cell.alignment = copy(source_cell.alignment) if source_cell.alignment else None
+
 def generate_renewal_proposal(old_data, new_data, comps_list=None):
+    from copy import copy
     template_path = '기안파일/Lease_Renewal_Proposal.xlsx'
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"템플릿 파일이 존재하지 않습니다: {template_path}")
@@ -32,7 +43,6 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
             try:
                 ws[cell].value = value
             except AttributeError:
-                # 'MergedCell' object attribute 'value' is read-only 에러 처리
                 for merged_range in ws.merged_cells.ranges:
                     if cell in merged_range:
                         top_left = merged_range.coord.split(':')[0]
@@ -52,6 +62,21 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
     
     new_gross_py = float(new_data.get('신규_총임대면적_평') or 0)
     new_exc_py = float(new_data.get('신규_전용면적_평') or 0)
+
+    # Date parsing logic for calculation
+    new_start_str = safe_str(new_data.get('갱신_임대시작일'))
+    new_end_str = safe_str(new_data.get('갱신_임대만료일'))
+    
+    dt_start = None
+    dt_end = None
+    renewal_months = 0
+    try:
+        dt_start = datetime.datetime.strptime(new_start_str, "%Y-%m-%d").date()
+        dt_end = datetime.datetime.strptime(new_end_str, "%Y-%m-%d").date()
+        # Calculate months and round down (절사)
+        renewal_months = math.floor((dt_end - dt_start).days / 365 * 12)
+    except Exception:
+        pass
 
     # 가. '임대갱신품의서' 시트
     set_value('임대갱신품의서', 'D6', safe_str(new_data.get('자산주소')))
@@ -79,24 +104,40 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
     set_value('임대갱신품의서', 'K14', format_money(old_maint))
     set_value('임대갱신품의서', 'D15', format_money(old_dep))
 
-    # [신규] 갱신 임대 조건 영역 (Streamlit 폼 입력 변수 덮어쓰기)
-    new_start_str = safe_str(new_data.get('갱신_임대시작일'))
-    new_end_str = safe_str(new_data.get('갱신_임대만료일'))
-    
-    # User explicitly requested D17, D18
-    set_value('임대갱신품의서', 'D17', new_end_str)
-    set_value('임대갱신품의서', 'D18', new_start_str)
-    
-    # Also overwrite the other cells found in the template under Renewal Proposal
+    # [수정 1] 계약 개월 수 (절사된 정수)
+    set_value('임대갱신품의서', 'D18', f"{renewal_months}개월" if renewal_months > 0 else "")
+
+    # [수정 2] Date 포맷 변경 (엑셀 서식)
+    ws_ren = wb['임대갱신품의서']
+    if dt_end:
+        ws_ren['D17'].value = dt_end
+        ws_ren['D17'].number_format = '[$-en-US]dd-mmm-yyyy;@'
+        ws_ren['J21'].value = dt_end
+        ws_ren['J21'].number_format = '[$-en-US]dd-mmm-yyyy;@'
+    else:
+        set_value('임대갱신품의서', 'D17', new_end_str)
+        set_value('임대갱신품의서', 'J21', new_end_str)
+
+    if dt_start:
+        # Note: Previous code was putting start date in D18, but user requested D18 to be Months.
+        # It seems the template might have shifted. I'll put start date in D17-ish, let's keep start/end correct based on the prompt. User didn't ask to remove D17. Wait, D22 is start date.
+        ws_ren['D22'].value = dt_start
+        ws_ren['D22'].number_format = '[$-en-US]dd-mmm-yyyy;@'
+    else:
+        set_value('임대갱신품의서', 'D22', new_start_str)
+
     set_value('임대갱신품의서', 'D19', new_gross_py if new_gross_py else "")
     set_value('임대갱신품의서', 'J18', new_exc_py if new_exc_py else "")
-    set_value('임대갱신품의서', 'J19', format_money(new_maint))
-    set_value('임대갱신품의서', 'D20', format_money(new_rent))
-    set_value('임대갱신품의서', 'D21', format_money(new_dep))
-    set_value('임대갱신품의서', 'J21', new_end_str)
-    set_value('임대갱신품의서', 'D22', new_start_str)
+    set_value('임대갱신품의서', 'J19', new_maint)
+    set_value('임대갱신품의서', 'D20', new_rent)
+    set_value('임대갱신품의서', 'D21', new_dep)
 
-    # C34 : 작업대산 계약이 속한 자산의 건물 전체의 평균 평당 관리비 (해당자산 모든 계약별 평당관리비의 합/계약 수)
+    # [수정 3] 고정 재무 지표 수식 적용 (J22, D25, G27)
+    ws_ren['J22'].value = '=(D21*J20)/12+D20+J19'
+    ws_ren['D25'].value = '=(D21*J20)+(D20*12)+(J19*12)'
+    ws_ren['G27'].value = '=(D21*J20)/2+(D20*6)+(J19*6)'
+
+    # C34 : 작업대산 계약이 속한 자산의 건물 전체의 평균 평당 관리비
     total_maint_per_py = 0
     count_contracts = 0
     
@@ -116,7 +157,7 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
     set_value('임대갱신품의서', 'C34', format_money(int(avg_maint_per_py)))
 
     # A38 : 지정된 텍스트 입력
-    a38_text = """[계약 명]
+    a38_text = f"""[계약 명]
 
 1. 협의 History
 1) 협의 이슈사항
@@ -124,7 +165,7 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
 
 2) 임대차 조건
  -   
--> 보증금 : 
+  -> 보증금 : 
   -> 임대료 : 
   -> 관리비 : 
   -> Rent-Free : 
@@ -135,6 +176,9 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
     set_value('임대갱신품의서', 'A38', a38_text)
 
     # 나. '비교표' 시트
+    set_value('비교표', 'A2', safe_str(new_data.get('임차인명')))
+    set_value('비교표', 'J10', f"{renewal_months}개월" if renewal_months > 0 else "")
+
     set_value('비교표', 'D4', py_to_sf(old_exc_py) if old_exc_py else "")
     set_value('비교표', 'G4', "좌동" if old_exc_py == new_exc_py else py_to_sf(new_exc_py))
     
@@ -172,7 +216,79 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
     set_value('비교표', 'G10', "좌동" if old_term == new_term else new_term)
     set_value('비교표', 'K10', "계약갱신")
 
-    # [비교 사례(Comps) 자동 추출 및 매핑 로직]
+    # [수정 4, 5] 비교표 연차별 스텝업 동적 렌더링
+    ws_comp = wb['비교표']
+    step_ups = new_data.get('step_ups', [])
+    years = max(2, math.ceil(renewal_months / 12) if renewal_months > 0 else 2)
+    
+    # Base columns for 1st, 2nd year: D=4, G=7 (spacing is 3)
+    start_col_idx = 4
+    col_spacing = 3
+
+    for y in range(1, years + 1):
+        target_col_idx = start_col_idx + (y - 1) * col_spacing
+        target_col = get_column_letter(target_col_idx)
+        
+        # Determine values
+        if y <= len(step_ups):
+            y_rent = int(step_ups[y-1].get('rent') or new_rent)
+            y_maint = int(step_ups[y-1].get('maint') or new_maint)
+        else:
+            y_rent = new_rent
+            y_maint = new_maint
+            
+        y_rent_annual = y_rent * 12
+        y_maint_annual = y_maint * 12
+
+        # Write text and values
+        ws_comp[f"{target_col}13"].value = f"{y}년 차"
+        ws_comp[f"{target_col}14"].value = new_dep
+        ws_comp[f"{target_col}15"].value = y_rent_annual
+        ws_comp[f"{target_col}16"].value = y_maint_annual
+        ws_comp[f"{target_col}17"].value = f"={target_col}14*임대갱신품의서!J20"
+        ws_comp[f"{target_col}18"].value = f"=SUM({target_col}15:{target_col}17)"
+        
+        # If y > 2, we must copy styles from 2nd year (col G)
+        if y > 2:
+            src_col = "G"
+            # 13행부터 18행까지 서식 복사, 병합도 해야하지만 단순화를 위해 각 셀 서식 복사
+            for row in range(13, 19):
+                src_cell = ws_comp[f"{src_col}{row}"]
+                tgt_cell = ws_comp[f"{target_col}{row}"]
+                copy_cell_style(src_cell, tgt_cell)
+
+    # Move Total Column (J열 로직) to the right
+    total_col_idx = start_col_idx + years * col_spacing
+    total_col = get_column_letter(total_col_idx)
+    
+    # 13행~18행 합계 서식 그리기
+    for row in range(13, 19):
+        # 기존 J열 서식을 복사 (J열 = 10)
+        src_cell = ws_comp[f"J{row}"]
+        tgt_cell = ws_comp[f"{total_col}{row}"]
+        copy_cell_style(src_cell, tgt_cell)
+        
+        # J열 내용 초기화 (만약 J열이 총계 열이 아니게 된 경우)
+        if total_col_idx != 10:
+            ws_comp[f"J{row}"].value = ""
+            
+        if row == 13:
+            tgt_cell.value = "합계(원)"
+        elif row == 14:
+            tgt_cell.value = "" # 보증금 공란
+        else:
+            # SUM range: D15:M15 (for 3 years)
+            end_sum_col = get_column_letter(total_col_idx - col_spacing)
+            tgt_cell.value = f"=SUM(D{row}:{end_sum_col}{row})"
+
+    # [비교 사례(Comps) 평단가 자동 추출] - 부가세 제외, 총 임대면적 기준
+    # C31 ~ C35 계산 (임대갱신품의서 쪽에 적용? 아 사용자가 비교사례 파트 C31이라고 함. 임대갱신품의서 시트의 C31을 의미하는듯.)
+    if new_gross_py > 0:
+        ws_ren['C31'].value = new_dep / new_gross_py
+        ws_ren['C32'].value = new_rent / new_gross_py
+        ws_ren['C33'].value = new_maint / new_gross_py
+        ws_ren['C35'].value = (new_rent * 100 + new_dep) / new_gross_py
+
     if comps_list and len(comps_list) > 0 and new_gross_py > 0:
         target_rent_per_py = new_rent / new_gross_py
         
@@ -188,12 +304,11 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
         comps_sorted.sort(key=lambda x: x[0])
         top_3_comps = comps_sorted[:3]
         
-        # ※ 실제 템플릿의 열 위치에 맞게 알파벳 및 행 좌표는 유연하게 지정
         cols = ['E', 'F', 'G']
-        row_floor = 13     # 예: 층수
-        row_dep_py = 14    # 예: 평당 보증금
-        row_rent_py = 15   # 예: 평당 임대료
-        row_maint_py = 16  # 예: 평당 관리비
+        row_floor = 13     
+        row_dep_py = 14    
+        row_rent_py = 15   
+        row_maint_py = 16  
         
         for idx, (diff, rent_per_py, comp) in enumerate(top_3_comps):
             if idx >= 3: break

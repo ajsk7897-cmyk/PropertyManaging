@@ -292,6 +292,10 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
     set_value(1, 'G21', f"={total_col}18/G22", num_format='#,##0.00')
     set_value(1, 'G20', f"={total_col}18/G22/{years}", num_format='#,##0.00')
 
+    for col in ['E', 'F', 'G', 'H', 'I', 'J']:
+        set_value(0, f'{col}35', "")
+
+
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)

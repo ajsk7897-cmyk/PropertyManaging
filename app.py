@@ -4076,6 +4076,14 @@ with tab_history:
                             "기존_보증금": old_c["deposit"],
                             "기존_임대차기간": f"{old_c['start_date']} ~ {old_c['end_date']}",
                         }
+                        step_ups_list = []
+                        if "rent_schedule" in new_c and new_c["rent_schedule"]:
+                            try:
+                                schedule_list = json.loads(new_c["rent_schedule"])
+                                step_ups_list = [{"rent": s.get("rent", 0), "maint": s.get("maint", 0)} for s in schedule_list]
+                            except:
+                                pass
+
                         new_data = {
                             "자산주소": new_c["asset_name"],
                             "GPMS_ID": f"C-{old_contract_id}",
@@ -4095,6 +4103,7 @@ with tab_history:
                             "임대료비고": "",
                             "관리비비고": "",
                             "기간비고": "",
+                            "step_ups": step_ups_list,
                         }
 
                         c.execute(

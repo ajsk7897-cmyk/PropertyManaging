@@ -4031,7 +4031,7 @@ with tab_history:
 
         display_styled_table(center_styler(df_display_hist))
 
-        renewals = df_display_hist[df_display_hist["유형"] == "갱신"]
+        renewals = df_display_hist[(df_display_hist["유형"] == "갱신") & (df_display_hist["자산명"].notna())]
         if not renewals.empty:
             st.markdown("---")
             st.markdown("#### 📄 갱신 이력 기안서류(Lease Renewal Proposal) 재출력")

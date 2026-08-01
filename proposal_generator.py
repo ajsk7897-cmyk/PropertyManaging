@@ -50,17 +50,17 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
             value = ""
         target_cell = None
         try:
-                ws[cell].value = value
-                target_cell = ws[cell]
-            except AttributeError:
-                for merged_range in ws.merged_cells.ranges:
-                    if cell in merged_range:
-                        top_left = merged_range.coord.split(':')[0]
-                        ws[top_left].value = value
-                        target_cell = ws[top_left]
-                        break
-            if target_cell and num_format:
-                target_cell.number_format = num_format
+            ws[cell].value = value
+            target_cell = ws[cell]
+        except AttributeError:
+            for merged_range in ws.merged_cells.ranges:
+                if cell in merged_range:
+                    top_left = merged_range.coord.split(':')[0]
+                    ws[top_left].value = value
+                    target_cell = ws[top_left]
+                    break
+        if target_cell and num_format:
+            target_cell.number_format = num_format
 
     def get_money(val):
         if val is None or str(val).strip() == "" or str(val).lower() == "none":

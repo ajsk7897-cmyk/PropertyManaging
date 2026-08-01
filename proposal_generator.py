@@ -288,9 +288,10 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
             end_sum_col = get_column_letter(total_col_idx - col_spacing)
             set_value(1, f"{total_col}{row}", f"=SUM(D{row}:{end_sum_col}{row})", num_format='#,##0')
 
+    set_value(1, 'F22', "환율 입력→")
     set_value(1, 'G22', "")
-    set_value(1, 'G21', f"={total_col}18/G22", num_format='#,##0.00')
-    set_value(1, 'G20', f"={total_col}18/G22/{years}", num_format='#,##0.00')
+    set_value(1, 'G21', f"=IFERROR({total_col}18/G22, \"-\")", num_format='#,##0.00')
+    set_value(1, 'G20', f"=IFERROR({total_col}18/G22/{years}, \"-\")", num_format='#,##0.00')
 
     for col in ['E', 'F', 'G', 'H', 'I', 'J']:
         set_value(0, f'{col}35', "")

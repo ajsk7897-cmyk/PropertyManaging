@@ -288,51 +288,9 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
             end_sum_col = get_column_letter(total_col_idx - col_spacing)
             set_value(1, f"{total_col}{row}", f"=SUM(D{row}:{end_sum_col}{row})", num_format='#,##0')
 
-    # [비교 사례(Comps) 평단가 자동 추출] - 부가세 제외, 총 임대면적 기준
-    # C30: 작업 중인 테넌트 명
-    set_value(0, 'C30', safe_str(new_data.get('임차인명')))
-    # C31 ~ C35 계산
-    if new_gross_py > 0:
-        set_value(0, 'C31', new_dep / new_gross_py, num_format='#,##0')
-        set_value(0, 'C32', new_rent / new_gross_py, num_format='#,##0')
-        set_value(0, 'C33', new_maint / new_gross_py, num_format='#,##0')
-        set_value(0, 'C35', (new_rent * 100 + new_dep) / new_gross_py, num_format='#,##0')
-        
-    for col in ['E', 'F', 'G', 'H', 'I', 'J']:
-        set_value(0, f'{col}35', "")
-
-    if comps_list and len(comps_list) > 0 and new_gross_py > 0:
-        target_rent_per_py = new_rent / new_gross_py
-        
-        comps_sorted = []
-        for comp in comps_list:
-            comp_area = float(comp.get('contract_area', 0))
-            if comp_area <= 0: continue
-            comp_rent = float(comp.get('monthly_rent', 0))
-            comp_rent_per_py = comp_rent / comp_area
-            diff = abs(comp_rent_per_py - target_rent_per_py)
-            comps_sorted.append((diff, comp_rent_per_py, comp))
-            
-        comps_sorted.sort(key=lambda x: x[0])
-        top_3_comps = comps_sorted[:3]
-        
-        cols = ['E', 'F', 'G']
-        row_floor = 30     
-        row_dep_py = 31    
-        row_rent_py = 32   
-        row_maint_py = 33  
-        
-        for idx, (diff, rent_per_py, comp) in enumerate(top_3_comps):
-            if idx >= 3: break
-            col = cols[idx]
-            comp_area = float(comp.get('contract_area', 1))
-            dep_per_py = float(comp.get('deposit', 0)) / comp_area
-            maint_per_py = float(comp.get('monthly_maintenance_fee', 0)) / comp_area
-            
-            set_value(0, f'{col}{row_floor}', safe_str(comp.get('floor')))
-            set_value(0, f'{col}{row_dep_py}', get_money(dep_per_py), num_format='#,##0')
-            set_value(0, f'{col}{row_rent_py}', get_money(rent_per_py), num_format='#,##0')
-            set_value(0, f'{col}{row_maint_py}', get_money(maint_per_py), num_format='#,##0')
+    set_value(1, 'G22', "")
+    set_value(1, 'G21', f"={total_col}18/G22", num_format='#,##0.00')
+    set_value(1, 'G20', f"={total_col}18/G22/{years}", num_format='#,##0.00')
 
     output = io.BytesIO()
     wb.save(output)

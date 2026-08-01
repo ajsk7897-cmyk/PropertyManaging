@@ -280,7 +280,9 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
             set_value('비교표', f"{total_col}{row}", f"=SUM(D{row}:{end_sum_col}{row})", num_format='#,##0')
 
     # [비교 사례(Comps) 평단가 자동 추출] - 부가세 제외, 총 임대면적 기준
-    # C31 ~ C35 계산 (임대갱신품의서 쪽에 적용? 아 사용자가 비교사례 파트 C31이라고 함. 임대갱신품의서 시트의 C31을 의미하는듯.)
+    # C30: 작업 중인 테넌트 명
+    set_value('임대갱신품의서', 'C30', safe_str(new_data.get('임차인명')))
+    # C31 ~ C35 계산
     if new_gross_py > 0:
         set_value('임대갱신품의서', 'C31', new_dep / new_gross_py, num_format='#,##0')
         set_value('임대갱신품의서', 'C32', new_rent / new_gross_py, num_format='#,##0')

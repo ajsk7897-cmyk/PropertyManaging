@@ -4031,15 +4031,22 @@ with tab_history:
 
         display_styled_table(center_styler(df_display_hist))
 
-        renewals = df_display_hist[(df_display_hist["유형"] == "갱신") & (df_display_hist["자산명"].notna())]
-        if not renewals.empty:
+        raw_renewals = df_display_hist[df_display_hist["유형"] == "갱신"]
+        if not raw_renewals.empty:
             st.markdown("---")
             st.markdown("#### 📄 갱신 이력 기안서류(Lease Renewal Proposal) 재출력")
-            renewal_opts = renewals.apply(
-                lambda x: f"[{x['이력ID']}] {x['자산명'] if pd.notna(x['자산명']) else '자산명 없음'} {x['층'] if pd.notna(x['층']) else ''} - {x['업체명'] if pd.notna(x['업체명']) else '업체명 없음'} ({x['발생일']})",
-                axis=1,
-            ).tolist()
-            sel_hist_str = st.selectbox("다운로드할 갱신 이력 선택", renewal_opts)
+            
+            renewals = raw_renewals[raw_renewals["자산명"].notna()]
+            sel_hist_str = None
+            
+            if renewals.empty:
+                st.info("⚠️ 현재 다운로드 가능한 정상 갱신 이력이 없습니다. (과거 오류로 저장된 이력은 목록에서 숨김 처리됨)")
+            else:
+                renewal_opts = renewals.apply(
+                    lambda x: f"[{x['이력ID']}] {x['자산명']} {x['층'] if pd.notna(x['층']) else ''} - {x['업체명']} ({x['발생일']})",
+                    axis=1,
+                ).tolist()
+                sel_hist_str = st.selectbox("다운로드할 갱신 이력 선택", renewal_opts)
             if sel_hist_str:
                 hist_id = int(sel_hist_str.split("]")[0][1:])
                 try:

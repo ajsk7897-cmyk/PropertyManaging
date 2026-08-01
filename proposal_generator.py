@@ -145,6 +145,7 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
     set_value(0, 'J22', '=(D21*J20)/12+D20+J19', num_format='#,##0')
     set_value(0, 'D25', '=(D15*J20)+(D14*12)+(J14*12)', num_format='#,##0')
     set_value(0, 'J25', '=(D21*J20)+(D20*12)+(J19*12)', num_format='#,##0')
+    set_value(0, 'G26', '=J25/D25-1', num_format='0.0%')
     set_value(0, 'G27', '=(D21*J20)/2+(D20*6)+(J19*6)', num_format='#,##0')
 
     # C34 : 작업대산 계약이 속한 자산의 건물 전체의 평균 평당 관리비

@@ -105,7 +105,7 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
     new_dep = get_money(new_data.get('갱신_보증금'))
 
     set_value('임대갱신품의서', 'D14', old_rent, num_format='#,##0')
-    set_value('임대갱신품의서', 'K14', old_maint, num_format='#,##0')
+    set_value('임대갱신품의서', 'J14', old_maint, num_format='#,##0')
     set_value('임대갱신품의서', 'D15', old_dep, num_format='#,##0')
 
     # [수정 1] 계약 개월 수 (절사된 정수)
@@ -135,7 +135,7 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
 
     # [수정 3] 고정 재무 지표 수식 적용 (D25, J25, G27)
     set_value('임대갱신품의서', 'J22', '=(D21*J20)/12+D20+J19', num_format='#,##0')
-    set_value('임대갱신품의서', 'D25', '=(D15*J20)+(D14*12)+(K14*12)', num_format='#,##0')
+    set_value('임대갱신품의서', 'D25', '=(D15*J20)+(D14*12)+(J14*12)', num_format='#,##0')
     set_value('임대갱신품의서', 'J25', '=(D21*J20)+(D20*12)+(J19*12)', num_format='#,##0')
     set_value('임대갱신품의서', 'G27', '=(D21*J20)/2+(D20*6)+(J19*6)', num_format='#,##0')
 
@@ -269,10 +269,6 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
         src_cell = ws_comp[f"J{row}"]
         tgt_cell = ws_comp[f"{total_col}{row}"]
         copy_cell_style(src_cell, tgt_cell)
-        
-        # J열 내용 초기화 (만약 J열이 총계 열이 아니게 된 경우)
-        if total_col_idx != 10:
-            set_value('비교표', f"J{row}", "")
             
         if row == 13:
             set_value('비교표', f"{total_col}{row}", "합계(원)")
@@ -290,6 +286,9 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
         set_value('임대갱신품의서', 'C32', new_rent / new_gross_py, num_format='#,##0')
         set_value('임대갱신품의서', 'C33', new_maint / new_gross_py, num_format='#,##0')
         set_value('임대갱신품의서', 'C35', (new_rent * 100 + new_dep) / new_gross_py, num_format='#,##0')
+        
+    for col in ['E', 'F', 'G', 'H', 'I', 'J']:
+        set_value('임대갱신품의서', f'{col}35', "")
 
     if comps_list and len(comps_list) > 0 and new_gross_py > 0:
         target_rent_per_py = new_rent / new_gross_py

@@ -317,10 +317,10 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
         top_3_comps = comps_sorted[:3]
         
         cols = ['E', 'F', 'G']
-        row_floor = 13     
-        row_dep_py = 14    
-        row_rent_py = 15   
-        row_maint_py = 16  
+        row_floor = 30     
+        row_dep_py = 31    
+        row_rent_py = 32   
+        row_maint_py = 33  
         
         for idx, (diff, rent_per_py, comp) in enumerate(top_3_comps):
             if idx >= 3: break
@@ -329,10 +329,10 @@ def generate_renewal_proposal(old_data, new_data, comps_list=None):
             dep_per_py = float(comp.get('deposit', 0)) / comp_area
             maint_per_py = float(comp.get('monthly_maintenance_fee', 0)) / comp_area
             
-            set_value('비교표', f'{col}{row_floor}', safe_str(comp.get('floor')))
-            set_value('비교표', f'{col}{row_dep_py}', get_money(dep_per_py), num_format='#,##0')
-            set_value('비교표', f'{col}{row_rent_py}', get_money(rent_per_py), num_format='#,##0')
-            set_value('비교표', f'{col}{row_maint_py}', get_money(maint_per_py), num_format='#,##0')
+            set_value(0, f'{col}{row_floor}', safe_str(comp.get('floor')))
+            set_value(0, f'{col}{row_dep_py}', get_money(dep_per_py), num_format='#,##0')
+            set_value(0, f'{col}{row_rent_py}', get_money(rent_per_py), num_format='#,##0')
+            set_value(0, f'{col}{row_maint_py}', get_money(maint_per_py), num_format='#,##0')
 
     output = io.BytesIO()
     wb.save(output)

@@ -5,6 +5,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import Border, Side, PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
 import os
+from copy import copy
 
 def py_to_sqm(py):
     if not py: return ""
@@ -28,7 +29,6 @@ def copy_cell_style(source_cell, target_cell):
     target_cell.alignment = copy(source_cell.alignment) if source_cell.alignment else None
 
 def generate_renewal_proposal(old_data, new_data, comps_list=None):
-    from copy import copy
     template_path = '기안파일/Lease_Renewal_Proposal.xlsx'
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"템플릿 파일이 존재하지 않습니다: {template_path}")

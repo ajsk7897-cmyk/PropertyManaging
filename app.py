@@ -3492,7 +3492,11 @@ with tab_contract_update:
                                     remarks,
                                 ),
                             )
-                            new_contract_id = c.lastrowid
+                            if 'postgres' in engine.dialect.name.lower():
+                                c.execute("SELECT LASTVAL()")
+                                new_contract_id = c.fetchone()[0]
+                            else:
+                                new_contract_id = c.lastrowid
 
                             c.execute(
                                 """
@@ -3612,7 +3616,11 @@ with tab_contract_update:
                                     remarks,
                                 ),
                             )
-                            new_contract_id = c.lastrowid
+                            if 'postgres' in engine.dialect.name.lower():
+                                c.execute("SELECT LASTVAL()")
+                                new_contract_id = c.fetchone()[0]
+                            else:
+                                new_contract_id = c.lastrowid
 
                             history_details["이전계약ID"] = target_contract_id
                             c.execute(

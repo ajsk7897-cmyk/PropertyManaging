@@ -4055,12 +4055,16 @@ with tab_history:
                     fetch_data.clear()
 
                     if old_contract_id:
-                        new_c = fetch_data(
+                        new_c_df = fetch_data(
                             f"SELECT * FROM Lease_Contracts WHERE contract_id = {new_contract_id}"
-                        ).iloc[0]
-                        old_c = fetch_data(
+                        )
+                        old_c_df = fetch_data(
                             f"SELECT * FROM Lease_Contracts WHERE contract_id = {old_contract_id}"
-                        ).iloc[0]
+                        )
+                        if new_c_df.empty or old_c_df.empty:
+                            raise ValueError("원본 계약 데이터가 삭제되어 기안서류를 재생성할 수 없습니다.")
+                        new_c = new_c_df.iloc[0]
+                        old_c = old_c_df.iloc[0]
 
                         import proposal_generator
                         import importlib

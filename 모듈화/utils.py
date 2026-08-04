@@ -955,6 +955,23 @@ def fetch_market_research_data():
     df["평당 임대료"] = df["㎡당 임대료"] * 3.3058
     return df
 
+def check_contract_overlap(asset_name, floor, start_date, end_date, exclude_contract_id=None):
+    from 모듈화.utils import fetch_data
+    
+    # We check if there's any contract for the same asset & floor
+    # where existing_start <= new_end AND existing_end >= new_start
+    query = f"""
+    SELECT contract_id FROM Lease_Contracts 
+    WHERE asset_name = '{asset_name}' AND floor = '{floor}'
+      AND start_date <= '{end_date}' AND end_date >= '{start_date}'
+    """
+    
+    if exclude_contract_id:
+        query += f" AND contract_id != {exclude_contract_id}"
+        
+    df = fetch_data(query)
+    return not df.empty
+
 # ==========================================
 # Tab 0: 마스터 대시보드
 

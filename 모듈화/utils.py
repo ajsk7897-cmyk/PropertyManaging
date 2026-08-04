@@ -972,6 +972,105 @@ def check_contract_overlap(asset_name, floor, company_name, start_date, end_date
     df = fetch_data(query)
     return not df.empty
 
+
+def get_actual_monthly_rent_by_company(df_contracts_all, asset_name, floor, company_name, target_year, target_month):
+    import pandas as pd
+    import json
+    import calendar
+    from datetime import datetime, timedelta
+    from 모듈화.utils import _parse_rent_schedule
+    
+    df_filtered = df_contracts_all[
+        (df_contracts_all['asset_name'] == asset_name) &
+        (df_contracts_all['floor'] == floor) &
+        (df_contracts_all['company_name'] == company_name)
+    ]
+    
+    if df_filtered.empty:
+        return 0.0, 0.0
+        
+    _, last_day = calendar.monthrange(target_year, target_month)
+    curr_month_start = datetime(target_year, target_month, 1)
+    curr_month_end = datetime(target_year, target_month, last_day)
+    month_str = f"{target_year}-{target_month:02d}"
+    
+    total_rent = 0.0
+    total_maint = 0.0
+    
+    for _, row in df_filtered.iterrows():
+        start_date_str = row.get("start_date")
+        end_date_str = row.get("end_date")
+        
+        if pd.isna(start_date_str) or pd.isna(end_date_str) or not start_date_str or not end_date_str:
+            continue
+            
+        start = pd.to_datetime(start_date_str)
+        end = pd.to_datetime(end_date_str)
+        
+        if start > curr_month_end or end < curr_month_start:
+            continue
+            
+        overlap_start = max(start, curr_month_start)
+        overlap_end = min(end, curr_month_end)
+        
+        if overlap_start <= overlap_end:
+            rf_details = []
+            if "rent_free_details" in row and pd.notna(row["rent_free_details"]) and row["rent_free_details"]:
+                try:
+                    rf_details = json.loads(row["rent_free_details"])
+                except:
+                    rf_details = []
+            is_rf = month_str in (rf_details or [])
+            
+            initial_rent = float(row.get("monthly_rent", 0.0) if pd.notna(row.get("monthly_rent")) else 0.0)
+            initial_maint = float(row.get("monthly_maintenance_fee", 0.0) if pd.notna(row.get("monthly_maintenance_fee")) else 0.0)
+            rent_schedule_json = row.get("rent_schedule", None)
+            
+            schedule = _parse_rent_schedule(rent_schedule_json)
+            
+            if not schedule:
+                overlap_days = (overlap_end - overlap_start).days + 1
+                rent_to_charge = 0.0 if is_rf else (initial_rent * overlap_days / last_day)
+                maint_to_charge = (initial_maint * overlap_days / last_day)
+                total_rent += rent_to_charge
+                total_maint += maint_to_charge
+            else:
+                c_start = overlap_start
+                last_known_rent = initial_rent
+                last_known_maint = initial_maint
+                
+                while c_start <= overlap_end:
+                    current_rent = last_known_rent
+                    current_maint = last_known_maint
+                    next_change_date = overlap_end + timedelta(days=1)
+                    
+                    for period in schedule:
+                        s_date = pd.to_datetime(period["start_date"])
+                        e_date = pd.to_datetime(period["end_date"])
+                        
+                        if s_date <= c_start <= e_date:
+                            current_rent = float(period.get("rent", 0.0))
+                            current_maint = float(period.get("maint", 0.0))
+                            next_change_date = min(next_change_date, e_date + timedelta(days=1))
+                            break
+                        elif c_start < s_date:
+                            next_change_date = min(next_change_date, s_date)
+                        elif c_start > e_date:
+                            last_known_rent = float(period.get("rent", 0.0))
+                            last_known_maint = float(period.get("maint", 0.0))
+                            
+                    c_end = min(overlap_end, next_change_date - timedelta(days=1))
+                    days = (c_end - c_start).days + 1
+                    
+                    rent_to_charge = 0.0 if is_rf else (current_rent * days / last_day)
+                    maint_to_charge = (current_maint * days / last_day)
+                    total_rent += rent_to_charge
+                    total_maint += maint_to_charge
+                    
+                    c_start = c_end + timedelta(days=1)
+                    
+    return total_rent, total_maint
+
 # ==========================================
 # Tab 0: 마스터 대시보드
 

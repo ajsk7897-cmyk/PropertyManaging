@@ -3420,6 +3420,22 @@ with tab_contract_update:
                 elif contract_area < 0:
                     st.error("계약 면적은 0 이상이어야 합니다.")
                 else:
+                    # [UI 방어 로직] 계약 기간 중복 검증
+                    from 모듈화.utils import check_contract_overlap
+                    overlap_found = False
+                    exclude_id = None
+                    if update_mode not in ["✨ 신규 계약", "🔄 계약 갱신"]:
+                        exclude_id = target_contract_id
+                        
+                    for fl in sel_floors:
+                        if check_contract_overlap(asset_name, fl, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"), exclude_contract_id=exclude_id):
+                            overlap_found = True
+                            break
+                            
+                    if overlap_found:
+                        st.error("⚠️ 해당 층에 기간이 겹치는 기존 계약이 존재합니다. 기존 계약의 종료일을 앞당긴 후 다시 시도해 주세요.")
+                        st.stop()
+
                     try:
                         db_conn = engine.raw_connection()
                         c = db_conn.cursor()

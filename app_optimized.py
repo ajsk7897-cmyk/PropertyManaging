@@ -442,13 +442,7 @@ def calculate_rent_for_period_optimized(start_date, end_date, initial_rent, init
     rent_total = (applicable_rent / last_day) * total_days
     maint_total = (applicable_maint / last_day) * total_days
     
-    # Round based on currency
-    if currency == "KRW":
-        rent_total = int(rent_total // 10) * 10
-        maint_total = int(maint_total // 10) * 10
-    else:
-        rent_total = round(rent_total, 2)
-        maint_total = round(maint_total, 2)
+    # 원본 float 그대로 유지 (반올림/절사 없음)
     
     return rent_total, maint_total
 
@@ -938,7 +932,7 @@ def fetch_market_research_data():
                     })
     
     df = pd.DataFrame(data)
-    df["평당 임대료"] = (df["㎡당 임대료"] * 3.3058).round().astype(int)
+    df["평당 임대료"] = df["㎡당 임대료"] * 3.3058
     return df
 
 # ==========================================

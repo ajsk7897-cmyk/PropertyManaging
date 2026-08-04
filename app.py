@@ -956,7 +956,7 @@ def fetch_market_research_data():
                     })
     
     df = pd.DataFrame(data)
-    df["평당 임대료"] = (df["㎡당 임대료"] * 3.3058).round().astype(int)
+    df["평당 임대료"] = df["㎡당 임대료"] * 3.3058
     return df
 
 # ==========================================
@@ -2135,10 +2135,7 @@ with tab_rent_roll:
                         floor_rent = rent_to_charge_total
                         floor_maint = maint_to_charge_total
 
-                    # 1. 원단위 유지 (이전의 10원 미만 절사 제거)
-                    if currency != "KRW":
-                        floor_rent = round(floor_rent, 2)
-                        floor_maint = round(floor_maint, 2)
+                    # 원본 float 그대로 유지 (반올림/절사 없음)
 
                     floor_records[floor_name_unified][f"{month}월 임대료"] = floor_rent
                     floor_records[floor_name_unified][f"{month}월 관리비"] = floor_maint

@@ -952,7 +952,7 @@ def fetch_market_research_data():
                     })
     
     df = pd.DataFrame(data)
-    df["평당 임대료"] = (df["㎡당 임대료"] * 3.3058).round().astype(int)
+    df["평당 임대료"] = df["㎡당 임대료"] * 3.3058
     return df
 
 # ==========================================

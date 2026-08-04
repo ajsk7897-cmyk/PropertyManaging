@@ -1,0 +1,12 @@
+Row 11: B=None C=None D=None
+Row 12: B=None C=None D=None
+Row 13: B=None C=None D='1년'
+Row 14: B=None C=None D='₩ 100,449,000'
+Row 15: B=None C=None D='₩ 154,021,800'
+Row 16: B=None C=None D='₩ 79,460,520'
+Row 17: B=None C=None D='₩ 3,013,470'
+Row 18: B=None C=None D='₩ 236,495,790'
+Row 19: B=None C=None D=None
+Row 20: B=None C='연간 수입(USD)' D=None
+Row 21: B=None C='전체 수입(USD)' D=None
+Row 22: B=None C=None D=None

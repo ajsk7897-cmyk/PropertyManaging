@@ -407,7 +407,7 @@ def send_email_with_attachment(to_email, subject, body, file_bytes, file_name, m
 CURRENCY_RATES = {
     "USD_TO_KRW": 1400.0,  # TODO: Implement real-time exchange rate API
     "PY_TO_SQM": 3.3058,
-    "PY_TO_SF": 35.5832
+    "PY_TO_SF": 35.583
 }
 
 # Performance: Cache rent schedule parsing

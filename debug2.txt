@@ -1,0 +1,19 @@
+Row 1: A='임대 계약조건 비교 및 정리표' B=None C=None D=None
+Row 2: A='서울보증보험 강북지점\nSeoul Guarantee Insurance Gangbuk Branch' B=None C=None D=None
+Row 3: A='구분' B=None C=None D='변경전(종료시점)'
+Row 4: A='면적(전용,sf)' B=None C=None D='2,321.45'
+Row 5: A='면적(임대,sf)' B=None C=None D='3,971.45'
+Row 6: A='임차인' B=None C=None D='서울보증보험 강북지점'
+Row 7: A='보증금' B=None C=None D='₩100,449,000'
+Row 8: A='월임대료' B=None C=None D='₩11,529,000'
+Row 9: A='월관리비' B=None C=None D='₩6,563,800'
+Row 10: A='임대차기간' B=None C=None D='2025.04.01~2026.03.31'
+Row 11: A=None B=None C=None D=None
+Row 12: A='연간 income & 임대기간 내 총 income' B=None C=None D=None
+Row 13: A='항목' B=None C=None D='1년'
+Row 14: A='보증금' B=None C=None D='₩ 100,449,000'
+Row 15: A='연간임대료 (A)' B=None C=None D='₩ 154,021,800'
+Row 16: A='연간관리비 (B)' B=None C=None D='₩ 79,460,520'
+Row 17: A='보증금 funding cost (C)' B=None C=None D='₩ 3,013,470'
+Row 18: A='연간 수입 (A+B+C)' B=None C=None D='₩ 236,495,790'
+Row 19: A=None B=None C=None D=None

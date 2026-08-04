@@ -13,7 +13,7 @@ def py_to_sqm(py):
 
 def py_to_sf(py):
     if not py: return ""
-    return math.floor(float(py) * 35.5832 * 100) / 100
+    return math.floor(float(py) * 35.583 * 100) / 100
 
 def safe_str(val):
     if val is None or str(val).strip() == "" or str(val).lower() == "none":

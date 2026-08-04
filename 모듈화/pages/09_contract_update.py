@@ -658,8 +658,12 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                         break
                         
                 if overlap_found:
-                    st.error("⚠️ 해당 업체(임차인)의 기존 계약과 기간이 겹칩니다. 기존 계약의 종료일을 앞당긴 후 다시 시도해 주세요.")
-                    st.stop()
+                    if not st.session_state.get("confirm_overlap_save", False):
+                        st.session_state["confirm_overlap_save"] = True
+                        st.warning("⚠️ 신규 계약 시작일이 해당 업체의 기존 계약 기간과 겹칩니다. 조기 갱신(기존 계약 단축)이 맞다면 [저장] 버튼을 한 번 더 눌러주세요.")
+                        st.stop()
+                    else:
+                        st.session_state["confirm_overlap_save"] = False
 
                 try:
                     db_conn = engine.raw_connection()
@@ -748,6 +752,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                         db_conn.commit()
                         db_conn.close()
                         fetch_data.clear()
+                        st.session_state["confirm_overlap_save"] = False
                         st.success(
                             f"🎉 '{company_name}' 신규 계약이 등록되었습니다."
                         )
@@ -882,6 +887,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                         db_conn.commit()
                         db_conn.close()
                         fetch_data.clear()
+                        st.session_state["confirm_overlap_save"] = False
                         st.success(
                             f"🎉 '{company_name}' 계약이 성공적으로 갱신(버전 분리) 처리되었습니다."
                         )
@@ -935,6 +941,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                         db_conn.commit()
                         db_conn.close()
                         fetch_data.clear()
+                        st.session_state["confirm_overlap_save"] = False
                         st.success(f"✏️ '{company_name}' 기존 계약 정보가 성공적으로 수정(UPDATE)되었습니다.")
                         st.rerun()
 

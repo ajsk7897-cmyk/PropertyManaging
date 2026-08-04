@@ -37,43 +37,76 @@ df_contracts_all = fetch_data("SELECT * FROM Lease_Contracts")
     
 change_records = []
 if not df_contracts_all.empty:
-    for _, row in df_contracts_all.iterrows():
-        start_date_str = row.get("start_date")
-        end_date_str = row.get("end_date")
+    unique_groups = df_contracts_all[["asset_name", "floor", "company_name", "currency"]].drop_duplicates()
+    
+    # Pre-fetch manual overrides
+    df_overrides_last = fetch_data(f"SELECT * FROM RentRoll_Overrides WHERE year = {last_month.year} AND month = {last_month.month}")
+    df_overrides_this = fetch_data(f"SELECT * FROM RentRoll_Overrides WHERE year = {this_month.year} AND month = {this_month.month}")
+    
+    overrides_last_dict = {}
+    if not df_overrides_last.empty:
+        for _, ov in df_overrides_last.iterrows():
+            overrides_last_dict[(ov["contract_id"], ov["floor"])] = (ov["over_rent"], ov["over_maint"])
             
-        if pd.isna(start_date_str) or pd.isna(end_date_str) or not start_date_str or not end_date_str:
-            continue
-                
-        c_start = pd.to_datetime(start_date_str)
-        c_end = pd.to_datetime(end_date_str)
+    overrides_this_dict = {}
+    if not df_overrides_this.empty:
+        for _, ov in df_overrides_this.iterrows():
+            overrides_this_dict[(ov["contract_id"], ov["floor"])] = (ov["over_rent"], ov["over_maint"])
             
-        # Check if contract was active during last_month or this_month
-        if c_start > this_month_end or c_end < last_month:
-            continue
-                
-        cid = row["contract_id"]
-        company = row["company_name"]
-        asset = row["asset_name"]
-        floor = row["floor"]
-        currency = row.get("currency", "KRW")
-        if pd.isna(currency):
+    for _, group in unique_groups.iterrows():
+        asset = group["asset_name"]
+        floor = group["floor"]
+        company = group["company_name"]
+        currency = group["currency"]
+        if pd.isna(currency) or not currency:
             currency = "KRW"
             
-        def_rent = float(row.get("monthly_rent", 0) if pd.notna(row.get("monthly_rent")) else 0)
-        def_maint = float(row.get("monthly_maintenance_fee", 0) if pd.notna(row.get("monthly_maintenance_fee")) else 0)
+        last_rent, last_maint = get_actual_monthly_rent_by_company(df_contracts_all, asset, floor, company, last_month.year, last_month.month)
+        this_rent, this_maint = get_actual_monthly_rent_by_company(df_contracts_all, asset, floor, company, this_month.year, this_month.month)
+        
+        # Apply Overrides if any contract belonging to this company has one
+        active_contracts = df_contracts_all[
+            (df_contracts_all['asset_name'] == asset) &
+            (df_contracts_all['floor'] == floor) &
+            (df_contracts_all['company_name'] == company)
+        ]
+        for _, rc in active_contracts.iterrows():
+            cid = rc["contract_id"]
+            if (cid, floor) in overrides_last_dict:
+                last_rent, last_maint = overrides_last_dict[(cid, floor)]
+            if (cid, floor) in overrides_this_dict:
+                this_rent, this_maint = overrides_this_dict[(cid, floor)]
+                
+        if currency != "KRW":
+            last_rent = round(last_rent, 2)
+            last_maint = round(last_maint, 2)
+            this_rent = round(this_rent, 2)
+            this_maint = round(this_maint, 2)
             
-        rent_schedule = row.get("rent_schedule", "")
+        if last_rent == 0 and last_maint == 0 and this_rent == 0 and this_maint == 0:
+            continue
             
-        last_rent, last_maint = get_scheduled_amount(rent_schedule, last_month, def_rent, def_maint, currency)
-        this_rent, this_maint = get_scheduled_amount(rent_schedule, this_month, def_rent, def_maint, currency)
-            
-        # 절사 로직 제외된 정확한 값으로 비교
         if str(last_rent) != str(this_rent) or str(last_maint) != str(this_maint):
             change_type = []
             if last_rent != this_rent:
-                change_type.append("임대료 인상" if this_rent > last_rent else "임대료 인하")
+                if this_rent == 0 and last_rent > 0:
+                    change_type.append("임대료 인하 (당월 렌트프리)")
+                elif last_rent == 0 and this_rent > 0:
+                    change_type.append("임대료 인상 (렌트프리 종료)")
+                elif this_rent > last_rent:
+                    change_type.append("임대료 인상")
+                else:
+                    change_type.append("임대료 인하")
+                    
             if last_maint != this_maint:
-                change_type.append("관리비 인상" if this_maint > last_maint else "관리비 인하")
+                if this_maint == 0 and last_maint > 0:
+                    change_type.append("관리비 인하 (면제)")
+                elif last_maint == 0 and this_maint > 0:
+                    change_type.append("관리비 인상 (면제 종료)")
+                elif this_maint > last_maint:
+                    change_type.append("관리비 인상")
+                else:
+                    change_type.append("관리비 인하")
                 
             change_records.append({
                 "업체명": company,

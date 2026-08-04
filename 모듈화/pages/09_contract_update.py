@@ -805,6 +805,19 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
 
                     elif update_mode == "🔄 계약 갱신":
                         adjusted_old_end = start_date - timedelta(days=1)
+                        
+                        c.execute("SELECT start_date FROM Lease_Contracts WHERE contract_id = %s", (target_contract_id,))
+                        old_start_val = c.fetchone()[0]
+                        if isinstance(old_start_val, str):
+                            old_start_date = datetime.strptime(old_start_val.split(" ")[0], "%Y-%m-%d").date()
+                        else:
+                            import pandas as pd
+                            old_start_date = old_start_val.date() if hasattr(old_start_val, 'date') else pd.to_datetime(old_start_val).date()
+                            
+                        if adjusted_old_end < old_start_date:
+                            st.error("🚨 치명적 오류: 신규 갱신 시작일이 기존 계약의 최초 시작일보다 빠를 수 없습니다. 구 계약의 기간이 음수가 되므로 저장을 차단합니다.")
+                            st.stop()
+
                         c.execute(
                             """
                             UPDATE Lease_Contracts 

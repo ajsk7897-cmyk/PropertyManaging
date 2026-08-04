@@ -3428,12 +3428,12 @@ with tab_contract_update:
                         exclude_id = target_contract_id
                         
                     for fl in sel_floors:
-                        if check_contract_overlap(asset_name, fl, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"), exclude_contract_id=exclude_id):
+                        if check_contract_overlap(asset_name, fl, company_name, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"), exclude_contract_id=exclude_id):
                             overlap_found = True
                             break
                             
                     if overlap_found:
-                        st.error("⚠️ 해당 층에 기간이 겹치는 기존 계약이 존재합니다. 기존 계약의 종료일을 앞당긴 후 다시 시도해 주세요.")
+                        st.error("⚠️ 해당 업체(임차인)의 기존 계약과 기간이 겹칩니다. 기존 계약의 종료일을 앞당긴 후 다시 시도해 주세요.")
                         st.stop()
 
                     try:

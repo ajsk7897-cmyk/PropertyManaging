@@ -494,7 +494,7 @@ def format_money(x):
         return str(x)
 
 # Helper function to display styled table as HTML with scrolling
-def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css=""):
+def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", height=None):
     import uuid
     import streamlit.components.v1 as components
 
@@ -634,7 +634,13 @@ body {{ margin: 0; font-family: 'Pretendard', 'Inter', sans-serif; -webkit-font-
 </body>
 </html>
 """
-    components.html(wrapper, height=560, scrolling=False)
+    if height is None:
+        # 50px for header + 40px per row, max 560
+        calculated_height = min(560, max(120, len(df) * 40 + 50))
+    else:
+        calculated_height = height
+        
+    components.html(wrapper, height=calculated_height, scrolling=False)
 
 
 # DB Init

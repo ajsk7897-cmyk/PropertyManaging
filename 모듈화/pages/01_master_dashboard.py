@@ -118,37 +118,58 @@ else:
 
     with p2:
         with st.container(border=True):
-            st.markdown("#### 연도별 만기 도래 면적 (향후 5년)")
+            st.markdown("#### 자산별 월별 임대료 수입 (당해)")
             if not active_leases.empty:
                 current_year = today_md.year
-                active_leases["end_year"] = active_leases["end_date"].dt.year
-                df_exp = active_leases[
-                    (active_leases["end_year"] >= current_year) & 
-                    (active_leases["end_year"] <= current_year + 5)
-                ]
-                if not df_exp.empty:
-                    df_exp_grp = df_exp.groupby("end_year")["contract_area"].sum().reset_index()
-                    df_exp_grp["end_year"] = df_exp_grp["end_year"].astype(str)
-                    fig_exp = px.bar(
-                        df_exp_grp,
-                        x="end_year",
-                        y="contract_area",
-                        color_discrete_sequence=[sc_palette[0]]
+                all_assets = active_leases["asset_name"].unique().tolist()
+                
+                # 월별 임대료 계산을 위해 전체 계약 데이터 로드
+                df_all_leases_md = fetch_data("SELECT * FROM Lease_Contracts")
+                
+                monthly_data = []
+                for month_num in range(1, 13):
+                    for asset in all_assets:
+                        asset_contracts = df_all_leases_md[df_all_leases_md["asset_name"] == asset]
+                        groups = asset_contracts[["floor", "company_name"]].drop_duplicates()
+                        total_rent = 0.0
+                        for _, g in groups.iterrows():
+                            r, _ = get_actual_monthly_rent_by_company(
+                                df_all_leases_md, asset, g["floor"], g["company_name"],
+                                current_year, month_num, ignore_rent_free=True
+                            )
+                            total_rent += r
+                        monthly_data.append({
+                            "월": f"{month_num}월",
+                            "월_정렬": month_num,
+                            "자산명": asset,
+                            "임대료": round(total_rent)
+                        })
+                
+                df_monthly = pd.DataFrame(monthly_data)
+                if not df_monthly.empty and df_monthly["임대료"].sum() > 0:
+                    df_monthly = df_monthly.sort_values("월_정렬")
+                    fig_monthly = px.line(
+                        df_monthly,
+                        x="월",
+                        y="임대료",
+                        color="자산명",
+                        markers=True,
+                        color_discrete_sequence=sc_palette
                     )
-                    fig_exp.update_layout(
-                        xaxis_title="만기 연도",
-                        yaxis_title="만기 도래 면적(평)",
+                    fig_monthly.update_layout(
+                        xaxis_title="",
+                        yaxis_title="임대료 (원)",
                         margin=dict(l=0, r=0, t=30, b=0),
                         plot_bgcolor='rgba(0,0,0,0)',
                         paper_bgcolor='rgba(0,0,0,0)',
                         xaxis=dict(showgrid=False, zeroline=False),
-                        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", zeroline=False),
-                        showlegend=False
+                        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", zeroline=False, tickformat=","),
+                        legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5)
                     )
-                    fig_exp.update_traces(texttemplate='%{y:,.0f}', textposition='outside')
-                    st.plotly_chart(fig_exp, use_container_width=True)
+                    fig_monthly.update_traces(line=dict(width=2.5))
+                    st.plotly_chart(fig_monthly, use_container_width=True)
                 else:
-                    st.info("향후 5년 내 만기 도래 계약 없음")
+                    st.info("당해 임대료 데이터가 없습니다.")
             else:
                 st.info("데이터 없음")
                     

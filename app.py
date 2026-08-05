@@ -1099,6 +1099,7 @@ with tab_master_dashboard:
                             groups = asset_contracts[["floor", "company_name"]].drop_duplicates()
                             total_rent = 0.0
                             for _, g in groups.iterrows():
+                                from 모듈화.utils import get_actual_monthly_rent_by_company
                                 r, _ = get_actual_monthly_rent_by_company(
                                     df_all_leases_md, asset, g["floor"], g["company_name"],
                                     current_year, month_num, ignore_rent_free=True

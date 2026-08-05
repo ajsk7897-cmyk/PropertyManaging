@@ -973,7 +973,7 @@ def check_contract_overlap(asset_name, floor, company_name, start_date, end_date
     return not df.empty
 
 
-def get_actual_monthly_rent_by_company(df_contracts_all, asset_name, floor, company_name, target_year, target_month):
+def get_actual_monthly_rent_by_company(df_contracts_all, asset_name, floor, company_name, target_year, target_month, ignore_rent_free=False):
     import pandas as pd
     import json
     import calendar
@@ -1021,6 +1021,8 @@ def get_actual_monthly_rent_by_company(df_contracts_all, asset_name, floor, comp
                 except:
                     rf_details = []
             is_rf = month_str in (rf_details or [])
+            if ignore_rent_free:
+                is_rf = False
             
             initial_rent = float(row.get("monthly_rent", 0.0) if pd.notna(row.get("monthly_rent")) else 0.0)
             initial_maint = float(row.get("monthly_maintenance_fee", 0.0) if pd.notna(row.get("monthly_maintenance_fee")) else 0.0)

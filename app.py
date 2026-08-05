@@ -2445,6 +2445,7 @@ with tab_rent_change:
     df_contracts_all = fetch_data("SELECT * FROM Lease_Contracts")
     
     change_records = []
+    rf_records = []
     if not df_contracts_all.empty:
         unique_groups = df_contracts_all[["asset_name", "floor", "company_name", "currency"]].drop_duplicates()
         
@@ -2471,8 +2472,10 @@ with tab_rent_change:
                 currency = "KRW"
                 
             from 모듈화.utils import get_actual_monthly_rent_by_company
-            last_rent, last_maint = get_actual_monthly_rent_by_company(df_contracts_all, asset, floor, company, last_month.year, last_month.month)
-            this_rent, this_maint = get_actual_monthly_rent_by_company(df_contracts_all, asset, floor, company, this_month.year, this_month.month)
+            
+            # 1) 기본 임대료 변동 (렌트프리 무시)
+            last_rent_base, last_maint_base = get_actual_monthly_rent_by_company(df_contracts_all, asset, floor, company, last_month.year, last_month.month, ignore_rent_free=True)
+            this_rent_base, this_maint_base = get_actual_monthly_rent_by_company(df_contracts_all, asset, floor, company, this_month.year, this_month.month, ignore_rent_free=True)
             
             # Apply Overrides if any contract belonging to this company has one
             active_contracts = df_contracts_all[
@@ -2480,41 +2483,60 @@ with tab_rent_change:
                 (df_contracts_all['floor'] == floor) &
                 (df_contracts_all['company_name'] == company)
             ]
+            
+            has_rf_this_month = False
+            rf_saved_rent = 0.0
+            
             for _, rc in active_contracts.iterrows():
                 cid = rc["contract_id"]
                 if (cid, floor) in overrides_last_dict:
-                    last_rent, last_maint = overrides_last_dict[(cid, floor)]
+                    last_rent_base, last_maint_base = overrides_last_dict[(cid, floor)]
                 if (cid, floor) in overrides_this_dict:
-                    this_rent, this_maint = overrides_this_dict[(cid, floor)]
-                    
-            if currency != "KRW":
-                last_rent = round(last_rent, 2)
-                last_maint = round(last_maint, 2)
-                this_rent = round(this_rent, 2)
-                this_maint = round(this_maint, 2)
+                    this_rent_base, this_maint_base = overrides_this_dict[(cid, floor)]
                 
-            if last_rent == 0 and last_maint == 0 and this_rent == 0 and this_maint == 0:
+                # 렌트프리 여부 확인 (계약정보 업데이트 시 입력된 JSON 기반)
+                rf_list = rc.get("rent_free_details", "[]")
+                if pd.notna(rf_list) and rf_list:
+                    try:
+                        rfs = json.loads(rf_list)
+                        month_str = this_month.strftime("%Y-%m")
+                        if month_str in rfs:
+                            has_rf_this_month = True
+                    except:
+                        pass
+                        
+            if currency != "KRW":
+                last_rent_base = round(last_rent_base, 2)
+                last_maint_base = round(last_maint_base, 2)
+                this_rent_base = round(this_rent_base, 2)
+                this_maint_base = round(this_maint_base, 2)
+                
+            # 렌트프리 내역 추가
+            if has_rf_this_month and (this_rent_base > 0 or this_maint_base > 0):
+                # 렌트프리 절감액은 해당 월의 기본 임대료
+                rf_records.append({
+                    "자산명": asset,
+                    "층": floor,
+                    "업체명": company,
+                    "절감 임대료": this_rent_base,
+                    "절감 관리비": 0.0, # 보통 관리비는 렌트프리 대상 아님 (필요시 수정)
+                    "통화": currency
+                })
+                
+            if last_rent_base == 0 and last_maint_base == 0 and this_rent_base == 0 and this_maint_base == 0:
                 continue
                 
-            if str(last_rent) != str(this_rent) or str(last_maint) != str(this_maint):
+            if str(last_rent_base) != str(this_rent_base) or str(last_maint_base) != str(this_maint_base):
                 change_type = []
-                if last_rent != this_rent:
-                    if this_rent == 0 and last_rent > 0:
-                        change_type.append("임대료 인하 (당월 렌트프리)")
-                    elif last_rent == 0 and this_rent > 0:
-                        change_type.append("임대료 인상 (렌트프리 종료)")
-                    elif this_rent > last_rent:
-                        change_type.append("임대료 인상")
+                if last_rent_base != this_rent_base:
+                    if this_rent_base > last_rent_base:
+                        change_type.append("임대료 정기인상/갱신")
                     else:
                         change_type.append("임대료 인하")
                         
-                if last_maint != this_maint:
-                    if this_maint == 0 and last_maint > 0:
-                        change_type.append("관리비 인하 (면제)")
-                    elif last_maint == 0 and this_maint > 0:
-                        change_type.append("관리비 인상 (면제 종료)")
-                    elif this_maint > last_maint:
-                        change_type.append("관리비 인상")
+                if last_maint_base != this_maint_base:
+                    if this_maint_base > last_maint_base:
+                        change_type.append("관리비 정기인상/갱신")
                     else:
                         change_type.append("관리비 인하")
                     
@@ -2522,10 +2544,10 @@ with tab_rent_change:
                     "업체명": company,
                     "자산명": asset,
                     "층": floor,
-                    "기존 임대료": last_rent,
-                    "기존 관리비": last_maint,
-                    "변경 임대료": this_rent,
-                    "변경 관리비": this_maint,
+                    "기존 임대료": last_rent_base,
+                    "기존 관리비": last_maint_base,
+                    "변경 임대료": this_rent_base,
+                    "변경 관리비": this_maint_base,
                     "변경 내용": ", ".join(change_type),
                     "통화": currency
                 })
@@ -2538,7 +2560,7 @@ with tab_rent_change:
         
         col_c1, col_c2 = st.columns([7, 3], vertical_alignment="bottom")
         with col_c1:
-            st.markdown("### 상세 변동 내역")
+            st.markdown("### 📈 임대료 및 관리비 변동 내역 (렌트프리 제외)")
         with col_c2:
             st.download_button(
                 label="📥 엑셀 다운로드",
@@ -2551,7 +2573,32 @@ with tab_rent_change:
             
         display_styled_table(df_changes, freeze_cols=1)
     else:
-        st.info("이번 달 임대료 및 관리비 변동 내역이 없습니다.")
+        st.info("이번 달 정기인상 및 갱신에 따른 임대료 변동 내역이 없습니다.")
+        
+    st.markdown("---")
+    
+    if rf_records:
+        df_rf = pd.DataFrame(rf_records)
+        df_rf = df_rf[["자산명", "층", "업체명", "절감 임대료", "통화"]]
+        
+        csv_rf = generate_formatted_excel(df_rf, [])
+        
+        col_r1, col_r2 = st.columns([7, 3], vertical_alignment="bottom")
+        with col_r1:
+            st.markdown("### 🎁 당월 렌트프리 적용 내역")
+        with col_r2:
+            st.download_button(
+                label="📥 엑셀 다운로드",
+                data=csv_rf,
+                file_name=f"Rent_Free_{today.strftime('%Y%m')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_rent_free",
+                use_container_width=True
+            )
+            
+        display_styled_table(df_rf, freeze_cols=1)
+    else:
+        st.info("이번 달 렌트프리가 적용되는 업체가 없습니다.")
 
 # ==========================================
 # Tab 4: 자산정보 업데이트

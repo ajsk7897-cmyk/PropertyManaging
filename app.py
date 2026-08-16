@@ -940,7 +940,16 @@ def fetch_market_research_data():
         "대전": ["둔산", "은행동"]
     }
     asset_types = ["오피스", "소규모 상가", "중대형 상가"]
-    quarters = ["2023 1Q", "2023 2Q", "2023 3Q", "2023 4Q", "2024 1Q", "2024 2Q"]
+    from datetime import datetime
+    current_year = datetime.now().year
+    current_quarter = (datetime.now().month - 1) // 3 + 1
+    
+    quarters = []
+    for y in range(2023, current_year + 1):
+        for q in range(1, 5):
+            if y == current_year and q > current_quarter:
+                break
+            quarters.append(f"{y} {q}Q")
     
     data = []
     for r in regions:

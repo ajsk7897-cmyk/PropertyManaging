@@ -509,8 +509,6 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css=""):
             return ""
         try:
             val = float(x)
-            if abs(val) >= 1_000_000:
-                return f"{val/1_000_000:,.1f}백만"
             return f"{val:,.0f}"
         except:
             return str(x)
@@ -1014,7 +1012,7 @@ with tab_master_dashboard:
             f"{unique_companies}개 사",
             f"계약 {total_contracts}건",
         )
-        mr_str = f"₩ {monthly_revenue/1000000:,.0f}백만" if monthly_revenue >= 1000000 else f"₩ {monthly_revenue:,.0f}"
+        mr_str = f"₩ {monthly_revenue:,.0f}"
         c3.metric(
             "당월 총 청구 수익",
             mr_str,

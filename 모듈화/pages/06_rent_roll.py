@@ -253,8 +253,6 @@ if not df_c.empty:
                         return ""
                     try:
                         val = float(x)
-                        if abs(val) >= 1_000_000:
-                            return f"₩ {val/1_000_000:,.1f}백만"
                         return f"₩ {val:,.0f}"
                     except:
                         return str(x)
@@ -279,8 +277,6 @@ if not df_c.empty:
                         return ""
                     try:
                         val = float(x)
-                        if abs(val) >= 1_000_000:
-                            return f"USD {val/1_000_000:,.2f}백만"
                         return f"USD {val:,.2f}"
                     except:
                         return str(x)

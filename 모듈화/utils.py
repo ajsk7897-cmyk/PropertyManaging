@@ -487,8 +487,6 @@ def format_money(x):
         return ""
     try:
         val = float(x)
-        if abs(val) >= 1_000_000:
-            return f"{val/1_000_000:,.1f}백만"
         return f"{val:,.0f}"
     except:
         return str(x)

@@ -762,6 +762,27 @@ def fetch_data(query, _eng=None):
         _eng = get_engine()
     return pd.read_sql(query, _eng)
 
+def execute_query(query, params=(), commit=True):
+    """
+    Helper function to execute INSERT/UPDATE/DELETE queries safely.
+    It manages the raw connection, cursor, and commit process, reducing boilerplate.
+    Returns the lastrowid (if any) or None on success. Raises exception on failure.
+    """
+    db_conn = engine.raw_connection()
+    try:
+        c = db_conn.cursor()
+        c.execute(query, params)
+        last_id = c.lastrowid
+        if commit:
+            db_conn.commit()
+        return last_id
+    finally:
+        db_conn.close()
+        # Optionally clear cache if it's a write operation
+        if commit:
+            fetch_data.clear()
+
+
 
 def get_floor_sort_key(floor_str):
     if not isinstance(floor_str, str):
@@ -884,7 +905,6 @@ def get_months_between(start_date, end_date):
 
 @st.cache_data(ttl=86400)
 def fetch_market_research_data():
-    import random
     import pandas as pd
     import requests
     import streamlit as st
@@ -892,75 +912,27 @@ def fetch_market_research_data():
     # ---------------------------------------------------------
     # [실제 API 연동부] 
     # API 키는 .streamlit/secrets.toml의 R_ONE_API_KEY를 자동 참조합니다.
-    # 추후 실제 Endpoint URL과 파라미터 구조가 확정되면 아래 주석을 풀고 연동합니다.
     # ---------------------------------------------------------
     api_key = st.secrets.get("R_ONE_API_KEY", None)
-    api_endpoint = "https://api.reb.or.kr/v1/market/rent" # TODO: 실제 URL로 교체 필요
+    api_endpoint = "https://api.reb.or.kr/v1/market/rent"
     
-    if api_key and "TODO" not in api_endpoint:
+    if api_key:
         try:
-            # 실제 연동 예시
-            # response = requests.get(api_endpoint, params={"serviceKey": api_key, "format": "json"}, timeout=3)
-            # response.raise_for_status()
-            # items = response.json().get("response", {}).get("body", {}).get("items", [])
-            # df = pd.DataFrame(items)
-            # df["평당 임대료"] = (df["㎡당 임대료"] * 3.3058).round().astype(int)
-            # return df
-            pass
+            response = requests.get(api_endpoint, params={"serviceKey": api_key, "format": "json"}, timeout=5)
+            response.raise_for_status()
+            items = response.json().get("response", {}).get("body", {}).get("items", [])
+            df = pd.DataFrame(items)
+            if not df.empty and "㎡당 임대료" in df.columns:
+                df["평당 임대료"] = (df["㎡당 임대료"] * 3.3058).round().astype(int)
+            return df
         except Exception as e:
-            st.warning(f"API 연동 오류 (더미 데이터로 대체합니다): {e}")
-            
-    # ---------------------------------------------------------
-    # API가 구성되지 않았거나 실패했을 때를 대비한 더미 데이터 생성 로직
-    # ---------------------------------------------------------
-    regions = ["서울", "경기", "인천", "부산", "대구", "광주", "대전"]
-    sub_regions = {
-        "서울": ["강남대로", "테헤란로", "도산대로", "여의도", "광화문", "명동", "홍대합정"],
-        "경기": ["분당", "판교", "일산", "평촌"],
-        "인천": ["부평", "구월", "송도"],
-        "부산": ["서면", "해운대", "광복동"],
-        "대구": ["동성로", "수성구"],
-        "광주": ["상무지구", "충장로"],
-        "대전": ["둔산", "은행동"]
-    }
-    asset_types = ["오피스", "소규모 상가", "중대형 상가"]
-    
-    from datetime import datetime
-    current_year = datetime.now().year
-    current_quarter = (datetime.now().month - 1) // 3 + 1
-    
-    quarters = []
-    for y in range(2023, current_year + 1):
-        for q in range(1, 5):
-            if y == current_year and q > current_quarter:
-                break
-            quarters.append(f"{y} {q}Q")
-    
-    data = []
-    for r in regions:
-        for sr in sub_regions[r]:
-            for at in asset_types:
-                for q in quarters:
-                    base_rent = random.uniform(15000, 35000) if at == "오피스" else random.uniform(20000, 60000)
-                    if r == "서울":
-                        base_rent *= 1.5
-                    vacancy = random.uniform(2.0, 15.0)
-                    data.append({
-                        "지역명(시/도)": r,
-                        "세부 상권명": sr,
-                        "자산 유형": at,
-                        "기준 분기": q,
-                        "㎡당 임대료": round(base_rent),
-                        "공실률(%)": round(vacancy, 1)
-                    })
-    
-    df = pd.DataFrame(data)
-    df["평당 임대료"] = df["㎡당 임대료"] * 3.3058
-    return df
+            st.error(f"한국부동산원 API 통신 중 오류가 발생했습니다: {e}")
+            return pd.DataFrame()
+    else:
+        st.warning("⚠️ .streamlit/secrets.toml 파일에 R_ONE_API_KEY 가 설정되지 않았습니다. API 연동을 위해 키를 추가해주세요.")
+        return pd.DataFrame()
 
 def check_contract_overlap(asset_name, floor, company_name, start_date, end_date, exclude_contract_id=None):
-    from 모듈화.utils import fetch_data
-    
     # We check if there's any contract for the same asset & floor & company_name
     # where existing_start <= new_end AND existing_end >= new_start
     query = f"""
@@ -981,7 +953,6 @@ def get_actual_monthly_rent_by_company(df_contracts_all, asset_name, floor, comp
     import json
     import calendar
     from datetime import datetime, timedelta
-    from 모듈화.utils import _parse_rent_schedule
     
     df_filtered = df_contracts_all[
         (df_contracts_all['asset_name'] == asset_name) &

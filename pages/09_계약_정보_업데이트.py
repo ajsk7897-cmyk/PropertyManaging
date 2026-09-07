@@ -571,25 +571,19 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                     "기간비고": "",
                 }
 
-                db_conn = engine.raw_connection()
-                try:
-                    c = db_conn.cursor()
-                    c.execute(
-                        "SELECT floor, contract_area, deposit, monthly_rent, monthly_maintenance_fee FROM Lease_Contracts WHERE asset_name = %s AND status = 'ACTIVE' AND contract_id != %s",
-                        (asset_name, target_contract_id),
-                    )
-                    comps_data = [
-                        {
-                            "floor": r[0],
-                            "contract_area": r[1],
-                            "deposit": r[2],
-                            "monthly_rent": r[3],
-                            "monthly_maintenance_fee": r[4],
-                        }
-                        for r in c.fetchall()
-                    ]
-                finally:
-                    db_conn.close()
+                df_comps = fetch_data(
+                    f"SELECT floor, contract_area, deposit, monthly_rent, monthly_maintenance_fee FROM Lease_Contracts WHERE asset_name = '{asset_name}' AND status = 'ACTIVE' AND contract_id != {target_contract_id}"
+                )
+                comps_data = [
+                    {
+                        "floor": row["floor"],
+                        "contract_area": row["contract_area"],
+                        "deposit": row["deposit"],
+                        "monthly_rent": row["monthly_rent"],
+                        "monthly_maintenance_fee": row["monthly_maintenance_fee"],
+                    }
+                    for _, row in df_comps.iterrows()
+                ]
 
                 file_bytes, filename = generate_renewal_proposal(
                     old_data, new_data, comps_data

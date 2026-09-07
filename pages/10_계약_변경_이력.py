@@ -79,24 +79,17 @@ if not df_history.empty:
         if sel_hist_str:
             hist_id = int(sel_hist_str.split("]")[0][1:])
             try:
-                db_conn = engine.raw_connection()
-                try:
-                    c = db_conn.cursor()
-                    new_contract_id = int(
-                        c.execute(
-                            "SELECT contract_id FROM Contract_History WHERE history_id = %s",
-                            (hist_id,),
-                        ).fetchone()[0]
-                    )
-                    details_str = c.execute(
-                        "SELECT details FROM Contract_History WHERE history_id = %s",
-                        (hist_id,),
-                    ).fetchone()[0]
+                df_hist = fetch_data(f"SELECT contract_id, details FROM Contract_History WHERE history_id = {hist_id}")
+                if not df_hist.empty:
+                    new_contract_id = int(df_hist.iloc[0]["contract_id"])
+                    details_str = df_hist.iloc[0]["details"]
                     details_json = json.loads(details_str) if details_str else {}
                     old_contract_id = details_json.get("이전계약ID")
-                finally:
-                    db_conn.close()
-                fetch_data.clear()
+                else:
+                    old_contract_id = None
+            except Exception as e:
+                st.error(f"이력 조회 중 오류 발생: {e}")
+                old_contract_id = None
 
                 if old_contract_id:
                     new_c = fetch_data(
@@ -141,19 +134,18 @@ if not df_history.empty:
                         "기간비고": "",
                     }
 
-                    c.execute(
-                        "SELECT floor, contract_area, deposit, monthly_rent, monthly_maintenance_fee FROM Lease_Contracts WHERE asset_name = %s AND status = 'ACTIVE' AND contract_id != %s",
-                        (new_c["asset_name"], new_contract_id),
+                    df_comps = fetch_data(
+                        f"SELECT floor, contract_area, deposit, monthly_rent, monthly_maintenance_fee FROM Lease_Contracts WHERE asset_name = '{new_c['asset_name']}' AND status = 'ACTIVE' AND contract_id != {new_contract_id}"
                     )
                     comps_data = [
                         {
-                            "floor": r[0],
-                            "contract_area": r[1],
-                            "deposit": r[2],
-                            "monthly_rent": r[3],
-                            "monthly_maintenance_fee": r[4],
+                            "floor": row["floor"],
+                            "contract_area": row["contract_area"],
+                            "deposit": row["deposit"],
+                            "monthly_rent": row["monthly_rent"],
+                            "monthly_maintenance_fee": row["monthly_maintenance_fee"],
                         }
-                        for r in c.fetchall()
+                        for _, row in df_comps.iterrows()
                     ]
 
                     file_bytes, filename = generate_renewal_proposal(

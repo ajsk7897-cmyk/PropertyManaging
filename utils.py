@@ -816,9 +816,7 @@ def sort_df_by_asset_and_floor(df, asset_col="asset_name", floor_col="floor"):
     return df
 
 
-st.title("🏢 상업용 부동산 자산관리 시스템 (PM/AM)")
-
-with st.sidebar:
+def render_sidebar_notifications():
     st.header("🔔 D-180 만기 도래 알림 데스크")
     df_active = fetch_data(
         "SELECT asset_name, floor, company_name, end_date FROM Lease_Contracts WHERE status = 'ACTIVE'"
@@ -829,7 +827,6 @@ with st.sidebar:
         today = pd.to_datetime(datetime.now().date())
         df_active["d_day"] = (df_active["end_date"] - today).dt.days
 
-        # Filter 180 days or less, and >= 0 (not expired yet, or we can show expired as well)
         df_expiring = df_active[
             (df_active["d_day"] <= 180) & (df_active["d_day"] >= 0)
         ].sort_values("d_day")
@@ -848,33 +845,6 @@ with st.sidebar:
             st.info("현재 6개월 내 만기 도래 계약이 없습니다.")
     else:
         st.info("현재 활성 계약이 없습니다.")
-
-
-(
-    tab_master_dashboard,
-    tab_market_research,
-    tab_asset_view,
-    tab_stacking_plan,
-    tab_lease_info,
-    tab_rent_roll,
-    tab_rent_change,
-    tab_asset_update,
-    tab_contract_update,
-    tab_history,
-) = st.tabs(
-    [
-        "🌐 마스터 대시보드",
-        "📈 시장 동향 리서치",
-        "📊 자산별 면적 현황",
-        "🏢 스태킹 플랜",
-        "📝 자산별 임대정보",
-        "💰 렌트롤 (Rent Roll)",
-        "📉 임관리비 변동 현황",
-        "✏️ 자산정보 업데이트",
-        "✍️ 계약 업데이트",
-        "🕒 업데이트 이력 관리",
-    ]
-)
 
 
 def get_months_between(start_date, end_date):

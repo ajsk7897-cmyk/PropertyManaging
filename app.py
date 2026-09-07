@@ -16,6 +16,10 @@ pages = {
         st.Page('pages/10_계약_변경_이력.py', title='계약 변경 이력'),
     ]
 }
+from utils import render_sidebar_notifications
+
+with st.sidebar:
+    render_sidebar_notifications()
 
 pg = st.navigation(pages)
 pg.run()

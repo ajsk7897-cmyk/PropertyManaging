@@ -47,7 +47,7 @@ if not df_history.empty:
     months = sorted(df_history["발생월"].unique().tolist(), reverse=True)
     types = sorted(df_history["유형"].unique().tolist())
 
-    col_h1, col_h2 = st.columns(2, vertical_alignment="bottom")
+    col_h1, col_h2 = st.columns(2)
     with col_h1:
         selected_month = st.selectbox("📅 이력 조회 연/월", ["전체보기"] + months)
     with col_h2:
@@ -160,7 +160,7 @@ if not df_history.empty:
                         old_data, new_data, comps_data
                     )
                         
-                    col_dl1, col_dl2, col_dl3 = st.columns([4, 4, 2], vertical_alignment="bottom")
+                    col_dl1, col_dl2, col_dl3 = st.columns([4, 4, 2])
                     with col_dl1:
                         st.download_button(
                             "📥 선택한 이력 기안파일 다운로드",

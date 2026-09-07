@@ -148,7 +148,7 @@ if change_records:
     
     csv_changes = generate_formatted_excel(df_changes, [])
     
-    col_c1, col_c2 = st.columns([7, 3], vertical_alignment="bottom")
+    col_c1, col_c2 = st.columns([7, 3])
     with col_c1:
         st.markdown("### 📈 임대료 및 관리비 변동 내역 (렌트프리 제외)")
     with col_c2:
@@ -173,7 +173,7 @@ if rf_records:
     
     csv_rf = generate_formatted_excel(df_rf, [])
     
-    col_r1, col_r2 = st.columns([7, 3], vertical_alignment="bottom")
+    col_r1, col_r2 = st.columns([7, 3])
     with col_r1:
         st.markdown("### 🎁 당월 렌트프리 적용 내역")
     with col_r2:

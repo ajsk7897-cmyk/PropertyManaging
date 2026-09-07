@@ -89,7 +89,7 @@ if update_mode == "❌ 퇴점":
     st.markdown("#### 퇴점 처리 정보 입력")
     term_type = st.radio("퇴점 유형", ["만기 종료", "조기 종료"])
 
-    col_t1, col_t2 = st.columns(2, vertical_alignment="bottom")
+    col_t1, col_t2 = st.columns(2)
     with col_t1:
         term_date_default = pd.to_datetime(row_sel["end_date"]).date()
         if term_type == "조기 종료":
@@ -290,7 +290,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
         )
 
         st.markdown("#### 기본 계약 형태")
-        col_t1, col_t2 = st.columns(2, vertical_alignment="bottom")
+        col_t1, col_t2 = st.columns(2)
         with col_t1:
             idx_ct = 0
             if update_mode in ["🔄 계약 갱신", "📝 기존 계약 수정"]:
@@ -307,7 +307,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
             currency = st.radio("계약 통화", ["KRW", "USD"], index=idx_curr, horizontal=True)
 
         st.markdown("---")
-        col_a, col_b = st.columns(2, vertical_alignment="bottom")
+        col_a, col_b = st.columns(2)
         with col_a:
             try:
                 asset_idx = asset_list.index(default_vals["asset_name"])
@@ -356,7 +356,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
 
         st.markdown("---")
         st.markdown("#### 업체 및 면적 정보")
-        col_c1, col_c2 = st.columns(2, vertical_alignment="bottom")
+        col_c1, col_c2 = st.columns(2)
         with col_c1:
             company_name = st.text_input(
                 "🏢 업체명 (임차인)", value=default_vals["company"]
@@ -365,7 +365,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
         floor_areas = {}
         with col_c2:
             if contract_type == "단층 계약":
-                col_f1, col_f2 = st.columns(2, vertical_alignment="bottom")
+                col_f1, col_f2 = st.columns(2)
                 with col_f1:
                     contract_area = st.number_input(
                         "📐 계약 총면적 (평)",
@@ -396,7 +396,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                         if fl in default_vals["floor_details"]:
                             def_fl_area = float(default_vals["floor_details"][fl].get("area", 0.0))
                             def_fl_exc = float(default_vals["floor_details"][fl].get("exclusive_area", 0.0))
-                    col_f1, col_f2 = st.columns(2, vertical_alignment="bottom")
+                    col_f1, col_f2 = st.columns(2)
                     with col_f1:
                         fl_area = st.number_input(
                             f"{fl} 총면적",
@@ -424,7 +424,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                 )
 
         st.markdown("---")
-        col_d1, col_d2, col_d3 = st.columns(3, vertical_alignment="bottom")
+        col_d1, col_d2, col_d3 = st.columns(3)
         with col_d1:
             contract_date = st.date_input(
                 "📝 새 계약 체결일", value=default_vals["c_date"]
@@ -440,7 +440,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
 
         st.markdown("---")
         st.markdown("#### 💳 임대 조건 (계약 전체 총액)")
-        col_f1, col_f2, col_f3 = st.columns(3, vertical_alignment="bottom")
+        col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:
             dep_str = st.text_input(
                 "보증금 (총액)", value=f"{int(default_vals['deposit']):,}"
@@ -595,7 +595,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                     old_data, new_data, comps_data
                 )
                     
-                col_dl1, col_dl2, col_dl3 = st.columns([4, 4, 2], vertical_alignment="bottom")
+                col_dl1, col_dl2, col_dl3 = st.columns([4, 4, 2])
                 with col_dl1:
                     st.download_button(
                         "📄 갱신 기안서류 다운로드",
@@ -632,7 +632,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
             with st.container(border=True):
                 st.markdown("**입력된 신규 계약 정보를 바탕으로 엑셀 보고서를 생성하고 담당자에게 메일로 발송할 수 있습니다.**")
                 st.write("")
-                col_dl1, col_dl2 = st.columns([7, 3], vertical_alignment="bottom")
+                col_dl1, col_dl2 = st.columns([7, 3])
                 with col_dl1:
                     to_email_new = st.text_input("수신자 이메일 주소", label_visibility="collapsed", placeholder="example@domain.com", key="email_new_entry")
                 with col_dl2:

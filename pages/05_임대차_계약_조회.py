@@ -15,7 +15,7 @@ df_contracts = fetch_data(
 
 if not df_contracts.empty:
     # Filters
-    col_f1, col_f2 = st.columns(2, vertical_alignment="bottom")
+    col_f1, col_f2 = st.columns(2)
     with col_f1:
         assets = df_contracts["asset_name"].unique().tolist()
         sel_assets = st.multiselect(
@@ -123,7 +123,7 @@ if not df_contracts.empty:
     csv2 = generate_formatted_excel(df_display)
     file_name_2 = "lease_contracts.csv"
 
-    col_sum1, col_sum2, col_sum3, col_sum4 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
+    col_sum1, col_sum2, col_sum3, col_sum4 = st.columns([2.5, 3.5, 2.5, 1.5])
     with col_sum1:
         st.markdown("### 📊 자산 통합 Summary")
             

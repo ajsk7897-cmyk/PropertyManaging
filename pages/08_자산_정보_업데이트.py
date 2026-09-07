@@ -151,7 +151,7 @@ if asset_update_mode == "📝 기존 자산 수정":
             default_bank = float(row.get("bank_area", 0.0))
 
 with st.form("asset_manual_form"):
-    col_m1, col_m2 = st.columns(2, vertical_alignment="bottom")
+    col_m1, col_m2 = st.columns(2)
     with col_m1:
         if asset_update_mode == "✨ 신규 자산 등록":
             m_asset_name = st.text_input("자산명 (건물명)")

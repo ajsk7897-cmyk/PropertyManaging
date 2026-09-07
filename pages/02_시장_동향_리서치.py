@@ -8,7 +8,7 @@ st.markdown("한국부동산원 상업용부동산 임대동향조사 오픈 API
     
 market_df = fetch_market_research_data()
     
-f1, f2, f3 = st.columns(3, vertical_alignment="bottom")
+f1, f2, f3 = st.columns(3)
 with f1:
     sel_regions = st.multiselect("📍 지역명(시/도)", options=market_df["지역명(시/도)"].unique(), default=["서울"])
 with f2:
@@ -31,7 +31,7 @@ if not filtered_mdf.empty:
     agg_df = filtered_mdf.groupby("세부 상권명")[["평당 임대료", "공실률(%)"]].mean().reset_index()
     agg_df = agg_df.sort_values(by="평당 임대료", ascending=False)
         
-    c1, c2 = st.columns(2, vertical_alignment="bottom")
+    c1, c2 = st.columns(2)
     with c1:
         with st.container(border=True):
             st.markdown("#### 상권별 평균 평당 임대료")

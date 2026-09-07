@@ -59,7 +59,7 @@ else:
     vacant_area = max(0, total_exclusive_area - total_occupied)
 
     st.markdown("### 📊 포트폴리오 핵심 지표 (Executive KPIs)")
-    c1, c2, c3, c4 = st.columns(4, vertical_alignment="bottom")
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric(
         "통합 관리 자산 및 임대율",
         f"{total_assets}개",
@@ -74,17 +74,21 @@ else:
     c3.metric(
         "당월 총 청구 수익",
         mr_str,
+        delta=" ",
+        delta_color="off"
     )
     c4.metric(
         "통합 공실 면적",
         f"{vacant_area:,.1f} 평",
+        delta=" ",
+        delta_color="off"
     )
 
     st.markdown("---")
 
     # [2단: 3대 핵심 시각화 차트]
     st.markdown("### 📈 통합 데이터 시각화 (Portfolio Analytics)")
-    p1, p2 = st.columns(2, vertical_alignment="bottom")
+    p1, p2 = st.columns(2)
         
     sc_palette = ["#005EB8", "#00A546", "#38BDF8", "#34D399", "#94A3B8"]
 

@@ -192,7 +192,7 @@ if not df_asset.empty:
     csv_dash = generate_formatted_excel(dashboard_df_conv)
     file_name_dash = f"asset_total_dashboard_{unit_option}.xlsx"
 
-    col_dash1, col_dash2, col_dash3, col_dash4 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
+    col_dash1, col_dash2, col_dash3, col_dash4 = st.columns([2.5, 3.5, 2.5, 1.5])
     with col_dash1:
         st.markdown("### 📊 자산별 토탈 대시보드")
             
@@ -284,7 +284,7 @@ if not df_asset.empty:
     csv = generate_formatted_excel(display_df_conv)
     file_name_1 = f"asset_area_status_{unit_option}.xlsx"
 
-    col_a1, col_a2, col_a3, col_a4 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
+    col_a1, col_a2, col_a3, col_a4 = st.columns([2.5, 3.5, 2.5, 1.5])
     with col_a1:
         st.markdown("### 🏢 자산별 층별 상세 현황")
             

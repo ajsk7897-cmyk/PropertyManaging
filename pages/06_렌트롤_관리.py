@@ -12,7 +12,7 @@ st.markdown(
 df_c = fetch_data("SELECT * FROM Lease_Contracts")
 
 if not df_c.empty:
-    col_f1, col_f2, col_y1 = st.columns(3, vertical_alignment="bottom")
+    col_f1, col_f2, col_y1 = st.columns(3)
     with col_f1:
         assets = df_c["asset_name"].unique().tolist()
         sel_assets = st.multiselect(
@@ -188,7 +188,7 @@ if not df_c.empty:
         csv_rr = generate_formatted_excel(df_rr_with_sub, sub_indices)
         file_name_3 = f"rent_roll_{selected_year}_details.xlsx"
 
-        col_r1, col_r2, col_r3, col_r4 = st.columns([2.5, 3.5, 2.5, 1.5], vertical_alignment="bottom")
+        col_r1, col_r2, col_r3, col_r4 = st.columns([2.5, 3.5, 2.5, 1.5])
         with col_r1:
             st.markdown(f"### {selected_year}년 렌트롤 상세 내역")
                 

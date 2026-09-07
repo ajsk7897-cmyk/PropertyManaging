@@ -7,6 +7,7 @@ st.header("자산별 스태킹 플랜 (Visual Stacking Plan)")
 
 # Needs assets list
 df_asset_sp = fetch_data("SELECT DISTINCT asset_name FROM Asset_Area")
+assets_sp = []
 if not df_asset_sp.empty:
     assets_sp = df_asset_sp["asset_name"].tolist()
 # --- Visual Stacking Plan ---
@@ -14,9 +15,10 @@ st.markdown("---")
 st.subheader("🏢 자산별 스태킹 플랜 (Visual Stacking Plan)")
 
 # Select single asset for stacking plan
-sp_asset = st.selectbox("스태킹 플랜을 조회할 자산을 선택하세요", options=assets)
+sp_asset = st.selectbox("스태킹 플랜을 조회할 자산을 선택하세요", options=assets_sp)
 
 if sp_asset:
+    today_str = datetime.now().strftime("%Y-%m-%d")
     unit_sp = st.radio(
         "🔄 표출 면적 단위 선택",
         ["평", "㎡", "sqft"],

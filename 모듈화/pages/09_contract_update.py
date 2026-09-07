@@ -529,10 +529,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
         st.markdown("#### ✍️ 비고 사항")
         remarks = st.text_area("특약 및 비고 사항을 입력하세요.", value=default_vals.get("remarks", ""), key=f"remarks{key_suffix}")
 
-        st.markdown("---")
-        send_email = st.checkbox(
-            "저장 완료 시 담당자에게 엑셀 보고서 발송", value=True
-        )
+
 
         st.markdown("</div>", unsafe_allow_html=True)
         st.write("")
@@ -757,56 +754,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                             f"🎉 '{company_name}' 신규 계약이 등록되었습니다."
                         )
 
-                        if send_email:
-                            try:
-                                wb = load_workbook("report_template.xlsx")
-                                ws = wb.active
-                                ws["B3"] = company_name
-                                ws["B4"] = asset_name
-                                ws["B5"] = floor_str
-                                ws["B6"] = start_date.strftime("%Y-%m-%d")
-                                ws["B7"] = end_date.strftime("%Y-%m-%d")
-                                ws["B8"] = deposit
-                                ws["B9"] = monthly_rent
-                                report_filename = f"report_{company_name}.xlsx"
-                                wb.save(report_filename)
 
-                                if "email" in st.secrets:
-                                    msg = EmailMessage()
-                                    msg["Subject"] = (
-                                        f"[PM/AM] 신규 계약 체결 알림: {company_name}"
-                                    )
-                                    msg["From"] = st.secrets["email"]["user"]
-                                    msg["To"] = st.secrets["email"]["receiver"]
-                                    msg.set_content(
-                                        f"신규 계약이 등록되었습니다.\n자산명: {asset_name}\n업체명: {company_name}"
-                                    )
-
-                                    with open(report_filename, "rb") as fa:
-                                        msg.add_attachment(
-                                            fa.read(),
-                                            maintype="application",
-                                            subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                            filename=report_filename,
-                                        )
-
-                                    with smtplib.SMTP_SSL(
-                                        "smtp.gmail.com", 465
-                                    ) as smtp:
-                                        smtp.login(
-                                            st.secrets["email"]["user"],
-                                            st.secrets["email"]["password"],
-                                        )
-                                        smtp.send_message(msg)
-                                    st.success(
-                                        "📧 담당자에게 이메일 보고서가 발송되었습니다."
-                                    )
-                                else:
-                                    st.warning(
-                                        "⚠️ .streamlit/secrets.toml 에 이메일 설정이 없어 메일 발송이 생략되었습니다."
-                                    )
-                            except Exception as email_err:
-                                st.warning(f"⚠️ 메일 발송 실패: {email_err}")
 
                     elif update_mode == "🔄 계약 갱신":
                         adjusted_old_end = start_date - timedelta(days=1)

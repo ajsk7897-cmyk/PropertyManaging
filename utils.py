@@ -618,6 +618,8 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", hei
 
     uid = "tbl_" + uuid.uuid4().hex[:8]
     html = styler.to_html()
+    html = html.replace('/* tooltip: mid-month */"', '" title="월 중간에 인상 (일할 계산 적용)"')
+    html = html.replace('/* tooltip: renew */"', '" title="계약 갱신 (변경)"')
 
     if freeze_cols == 4:
         freeze_css = f"""

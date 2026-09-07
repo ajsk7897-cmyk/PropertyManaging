@@ -51,7 +51,7 @@ if not df_c.empty:
             ov["over_maint"],
         )
 
-    records = []
+    records_dict = {}
     for _, row in df_c.iterrows():
         try:
             start = pd.to_datetime(row["start_date"])
@@ -68,26 +68,30 @@ if not df_c.empty:
                 else []
             )
 
-            status_str = f"[{row['status']}] " if row["status"] != "ACTIVE" else ""
-
-            # 5. 복층 계약 렌트롤 표기 방식 변경 (단일 행 통합)
-            # 단일 층 표기로 통합, 비율 배분 제거
+            # 5. 복층 계약 렌트롤 표기 방식 변경 (단일 행 통합) 및 갱신 계약 병합
             floor_name_unified = row["floor"]
-            floor_records = {
-                floor_name_unified: {
+            company_clean = row["company_name"]
+            currency_val = row["currency"] if "currency" in row and pd.notnull(row["currency"]) else "KRW"
+            group_key = (row["asset_name"], floor_name_unified, company_clean, currency_val)
+
+            start_month = 6 if selected_year == 2026 else 1
+
+            if group_key not in records_dict:
+                records_dict[group_key] = {
                     "Contract_ID": row["contract_id"],
                     "자산명": row["asset_name"],
                     "층": floor_name_unified,
-                    "업체명": status_str + row["company_name"],
-                    "통화": (
-                        row["currency"]
-                        if "currency" in row and pd.notnull(row["currency"])
-                        else "KRW"
-                    ),
+                    "업체명": company_clean,
+                    "통화": currency_val,
                 }
-            }
+                for m in range(start_month, 13):
+                    records_dict[group_key][f"{m}월 임대료"] = 0.0
+                    records_dict[group_key][f"{m}월 관리비"] = 0.0
 
-            start_month = 6 if selected_year == 2026 else 1
+            # 수동 조정을 위해 활성 상태인 계약의 ID를 최우선으로 저장
+            if row["status"] == "ACTIVE":
+                records_dict[group_key]["Contract_ID"] = row["contract_id"]
+
             for month in range(start_month, 13):
                 month_str = f"{selected_year}-{month:02d}"
                 _, last_day = calendar.monthrange(selected_year, month)
@@ -170,17 +174,19 @@ if not df_c.empty:
                     floor_rent = round(floor_rent, 2)
                     floor_maint = round(floor_maint, 2)
 
-                floor_records[floor_name_unified][f"{month}월 임대료"] = floor_rent
-                floor_records[floor_name_unified][f"{month}월 관리비"] = floor_maint
-
-            for fl, rec in floor_records.items():
-                records.append(rec)
+                records_dict[group_key][f"{month}월 임대료"] += floor_rent
+                records_dict[group_key][f"{month}월 관리비"] += floor_maint
+                
+                if currency != "KRW":
+                    records_dict[group_key][f"{month}월 임대료"] = round(records_dict[group_key][f"{month}월 임대료"], 2)
+                    records_dict[group_key][f"{month}월 관리비"] = round(records_dict[group_key][f"{month}월 관리비"], 2)
 
         except Exception as e:
             st.error(
                 f"데이터 처리 중 오류 발생 (Contract ID: {row['contract_id']}): {e}"
             )
 
+    records = list(records_dict.values())
     if records:
         df_rr = pd.DataFrame(records)
         df_rr = sort_df_by_asset_and_floor(df_rr, "자산명", "층")

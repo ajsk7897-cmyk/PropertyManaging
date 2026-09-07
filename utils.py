@@ -485,6 +485,10 @@ def center_styler(df):
         
         rent_cols = [c for c in row.index if '월 임대료' in str(c) and str(c).replace('월 임대료', '').strip().isdigit()]
         
+        # _change_map: {월번호: 'renew'|'increase'} (데이터 생성시 주입된 메타데이터)
+        # _row_change_maps는 display_styled_table 클로저에서 참조
+        c_map = _row_change_maps.get(row.name, {})
+        
         for idx, col in enumerate(rent_cols):
             r_val = row[col]
             m_col = str(col).replace('임대료', '관리비')
@@ -494,6 +498,12 @@ def center_styler(df):
                 m_float = float(str(m_val).replace(',', ''))
             except:
                 continue
+            
+            month_num = None
+            try:
+                month_num = int(str(col).replace('월 임대료', '').strip())
+            except:
+                pass
             
             pr_float = 0
             if idx > 0:
@@ -527,7 +537,7 @@ def center_styler(df):
             if r_float <= 0:
                 continue
 
-            # ② 정기인상/갱신월: 이전달 대비 임대료 변동
+            # ② 갱신/정기인상월: _change_map 우선 참조, 없으면 값 변동으로 감지
             if pr_float > 0 and abs(r_float - pr_float) > 1.0:
                 if ppr_float > 0 and ((r_float > pr_float and pr_float > ppr_float) or (r_float < pr_float and pr_float < ppr_float)):
                     pass
@@ -535,14 +545,35 @@ def center_styler(df):
                     is_mid_month = False
                     if abs(next_r_float - r_float) > 1.0 and ((next_r_float > r_float and r_float > pr_float) or (next_r_float < r_float and r_float < pr_float)):
                         is_mid_month = True
-                        
-                    tooltip_class = "rr-mid-month" if is_mid_month else "rr-renew"
-                    style_str = f'background-color: #dcfce7 !important; font-weight: 700; color: #166534; data-tooltip: {tooltip_class}'
+                    
+                    # change_map으로 갱신/정기인상 구분
+                    change_type = c_map.get(month_num, 'increase') if month_num else 'increase'
+                    
+                    if is_mid_month:
+                        tooltip_class = "rr-mid-month"
+                        # 월 중간 갱신이면 주황, 정기인상이면 초록
+                        if change_type == 'renew':
+                            style_str = f'background-color: #fed7aa !important; font-weight: 700; color: #9a3412; data-tooltip: {tooltip_class}'
+                        else:
+                            style_str = f'background-color: #dcfce7 !important; font-weight: 700; color: #166534; data-tooltip: {tooltip_class}'
+                    elif change_type == 'renew':
+                        # 갱신: 주황색 계열
+                        tooltip_class = "rr-renew"
+                        style_str = f'background-color: #ffedd5 !important; font-weight: 700; color: #9a3412; data-tooltip: {tooltip_class}'
+                    else:
+                        # 정기인상: 초록색 계열
+                        tooltip_class = "rr-increase"
+                        style_str = f'background-color: #dcfce7 !important; font-weight: 700; color: #166534; data-tooltip: {tooltip_class}'
                     
                     styles[col_idx] = style_str
                     if m_idx is not None:
                         styles[m_idx] = style_str
         return styles
+
+    # _change_map 컬럼이 df에 있으면 추출 후 highlight 함수에서 활용
+    # (display 시에는 drop 되어 있지만, change_map_col 파라미터로 원본 데이터 참조)
+    # change_map_col은 df에 포함되어 있지 않을 수 있으므로 별도 df_full에서 추출
+    _row_change_maps = {}  # row index -> change_map dict
 
     styler = df.style.apply(highlight_total_row, axis=1)
     if any("임대료" in str(c) for c in df.columns):
@@ -560,12 +591,20 @@ def format_money(x):
         return str(x)
 
 # Helper function to display styled table as HTML with scrolling
-def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", height=None):
+def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", height=None, change_map_col=None):
     import uuid
     import streamlit.components.v1 as components
 
     if hasattr(df, "data"):
         df = df.data
+
+    # _change_map 메타데이터: change_map_col이 df 안에 있으면 미리 추출
+    _row_change_maps = {}
+    if change_map_col and change_map_col in df.columns:
+        for _ri, _rv in df[change_map_col].items():
+            if isinstance(_rv, dict):
+                _row_change_maps[_ri] = _rv
+        df = df.drop(columns=[change_map_col], errors="ignore")
 
     auto_format = {}
     for col in df.columns:
@@ -602,6 +641,10 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", hei
         
         rent_cols = [c for c in row.index if '월 임대료' in str(c) and str(c).replace('월 임대료', '').strip().isdigit()]
         
+        # _change_map: {월번호: 'renew'|'increase'} (데이터 생성시 주입된 메타데이터)
+        # _row_change_maps는 display_styled_table 클로저에서 참조
+        c_map = _row_change_maps.get(row.name, {})
+        
         for idx, col in enumerate(rent_cols):
             r_val = row[col]
             m_col = str(col).replace('임대료', '관리비')
@@ -611,6 +654,12 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", hei
                 m_float = float(str(m_val).replace(',', ''))
             except:
                 continue
+            
+            month_num = None
+            try:
+                month_num = int(str(col).replace('월 임대료', '').strip())
+            except:
+                pass
             
             pr_float = 0
             if idx > 0:
@@ -644,7 +693,7 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", hei
             if r_float <= 0:
                 continue
 
-            # ② 정기인상/갱신월: 이전달 대비 임대료 변동
+            # ② 갱신/정기인상월: _change_map 우선 참조, 없으면 값 변동으로 감지
             if pr_float > 0 and abs(r_float - pr_float) > 1.0:
                 if ppr_float > 0 and ((r_float > pr_float and pr_float > ppr_float) or (r_float < pr_float and pr_float < ppr_float)):
                     pass
@@ -652,14 +701,35 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", hei
                     is_mid_month = False
                     if abs(next_r_float - r_float) > 1.0 and ((next_r_float > r_float and r_float > pr_float) or (next_r_float < r_float and r_float < pr_float)):
                         is_mid_month = True
-                        
-                    tooltip_class = "rr-mid-month" if is_mid_month else "rr-renew"
-                    style_str = f'background-color: #dcfce7 !important; font-weight: 700; color: #166534; data-tooltip: {tooltip_class}'
+                    
+                    # change_map으로 갱신/정기인상 구분
+                    change_type = c_map.get(month_num, 'increase') if month_num else 'increase'
+                    
+                    if is_mid_month:
+                        tooltip_class = "rr-mid-month"
+                        # 월 중간 갱신이면 주황, 정기인상이면 초록
+                        if change_type == 'renew':
+                            style_str = f'background-color: #fed7aa !important; font-weight: 700; color: #9a3412; data-tooltip: {tooltip_class}'
+                        else:
+                            style_str = f'background-color: #dcfce7 !important; font-weight: 700; color: #166534; data-tooltip: {tooltip_class}'
+                    elif change_type == 'renew':
+                        # 갱신: 주황색 계열
+                        tooltip_class = "rr-renew"
+                        style_str = f'background-color: #ffedd5 !important; font-weight: 700; color: #9a3412; data-tooltip: {tooltip_class}'
+                    else:
+                        # 정기인상: 초록색 계열
+                        tooltip_class = "rr-increase"
+                        style_str = f'background-color: #dcfce7 !important; font-weight: 700; color: #166534; data-tooltip: {tooltip_class}'
                     
                     styles[col_idx] = style_str
                     if m_idx is not None:
                         styles[m_idx] = style_str
         return styles
+
+    # _change_map 컬럼이 df에 있으면 추출 후 highlight 함수에서 활용
+    # (display 시에는 drop 되어 있지만, change_map_col 파라미터로 원본 데이터 참조)
+    # change_map_col은 df에 포함되어 있지 않을 수 있으므로 별도 df_full에서 추출
+    _row_change_maps = {}  # row index -> change_map dict
 
     styler = df.style.apply(highlight_total_row, axis=1)
     if any("임대료" in str(c) for c in df.columns):
@@ -694,8 +764,12 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", hei
                 title = '📈 월 중간에 인상 (일할 계산 적용)'
             elif tt == 'rr-rent-free':
                 title = '🎁 렌트프리 (임대료 면제 월)'
+            elif tt == 'rr-renew':
+                title = '🔄 계약 갱신'
+            elif tt == 'rr-increase':
+                title = '📈 정기 인상'
             else:
-                title = '📊 정기 인상 / 계약 갱신'
+                title = '📈 정기 인상 / 계약 갱신'
             return td_tag.replace('<td ', f'<td title="{title}" ')
         return td_tag
     html = _re.sub(r'<td id="(T_[\w]+)"', _add_title_to_td, html)

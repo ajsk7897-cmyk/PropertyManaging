@@ -83,6 +83,7 @@ if not df_c.empty:
                     "층": floor_name_unified,
                     "업체명": company_clean,
                     "통화": currency_val,
+                    "_change_map": {},  # {month: 'renew' | 'increase'}
                 }
                 for m in range(start_month, 13):
                     records_dict[group_key][f"{m}월 임대료"] = 0.0
@@ -91,6 +92,9 @@ if not df_c.empty:
             # 수동 조정을 위해 활성 상태인 계약의 ID를 최우선으로 저장
             if row["status"] == "ACTIVE":
                 records_dict[group_key]["Contract_ID"] = row["contract_id"]
+            
+            # 갱신 확인: 이 계약이 RENEWED 상태라면 기여한 월은 '갱신월'
+            is_renewed_contract = (row["status"] == "RENEWED")
 
             for month in range(start_month, 13):
                 month_str = f"{selected_year}-{month:02d}"
@@ -169,7 +173,7 @@ if not df_c.empty:
                     floor_rent = rent_to_charge_total
                     floor_maint = maint_to_charge_total
 
-                # 1. 원단위 유지 (이전의 10원 미만 절사 제거)
+                # 1. 원단위 유지
                 if currency != "KRW":
                     floor_rent = round(floor_rent, 2)
                     floor_maint = round(floor_maint, 2)
@@ -181,6 +185,36 @@ if not df_c.empty:
                     records_dict[group_key][f"{month}월 임대료"] = round(records_dict[group_key][f"{month}월 임대료"], 2)
                     records_dict[group_key][f"{month}월 관리비"] = round(records_dict[group_key][f"{month}월 관리비"], 2)
 
+                # 변경 유형 메타데이터 기록
+                if floor_rent > 0 or floor_maint > 0:
+                    change_map = records_dict[group_key]["_change_map"]
+                    if is_renewed_contract:
+                        # RENEWED 상태 계약이 기여한 월 = 갱신월 (신구 계약과 겹치는 달)
+                        if month not in change_map:
+                            change_map[month] = 'renew'
+                    else:
+                        # ACTIVE 계약 내 rent_schedule에 의한 변동 = 정기인상월
+                        schedule = _parse_rent_schedule(row.get("rent_schedule", None))
+                        if schedule:
+                            from datetime import timedelta as _td
+                            for period in schedule:
+                                try:
+                                    s_date = pd.to_datetime(period["start_date"])
+                                    if not pd.isna(s_date) and s_date.year == selected_year and s_date.month == month and s_date.day > 1:
+                                        if month not in change_map:
+                                            change_map[month] = 'increase'
+                                except:
+                                    pass
+                            # rent_schedule의 새 구간이 월 첫날에 시작하는 경우
+                            for period in schedule:
+                                try:
+                                    s_date = pd.to_datetime(period["start_date"])
+                                    if not pd.isna(s_date) and s_date.year == selected_year and s_date.month == month and s_date.day == 1:
+                                        if month not in change_map:
+                                            change_map[month] = 'increase'
+                                except:
+                                    pass
+
         except Exception as e:
             st.error(
                 f"데이터 처리 중 오류 발생 (Contract ID: {row['contract_id']}): {e}"
@@ -189,6 +223,7 @@ if not df_c.empty:
     records = list(records_dict.values())
     if records:
         df_rr = pd.DataFrame(records)
+        # _change_map 컬럼은 메타데이터로 보존, 화면 표시에서는 제외
         df_rr = sort_df_by_asset_and_floor(df_rr, "자산명", "층")
 
         df_rr_krw = df_rr[df_rr["통화"] == "KRW"].copy()
@@ -241,15 +276,18 @@ if not df_c.empty:
         if view_mode == "👁️ 조회 모드 (완벽한 디자인 적용)":
             st.markdown(
                 """
-                <div style="display:flex; gap:16px; align-items:center; margin-bottom:10px; flex-wrap:wrap;">
+                <div style="display:flex; gap:12px; align-items:center; margin-bottom:10px; flex-wrap:wrap;">
                     <span style="font-size:12px; color:#64748b; font-weight:600;">📌 색상 범례</span>
                     <span style="background-color:#dcfce7; color:#166534; font-weight:700; padding:3px 10px; border-radius:20px; font-size:12px; border:1px solid #86efac;">
-                        🟢 정기인상 / 계약갱신
+                        🟢 정기인상
+                    </span>
+                    <span style="background-color:#ffedd5; color:#9a3412; font-weight:700; padding:3px 10px; border-radius:20px; font-size:12px; border:1px solid #fdba74;">
+                        🟠 계약갱신
                     </span>
                     <span style="background-color:#bfdbfe; color:#1e40af; font-weight:700; padding:3px 10px; border-radius:20px; font-size:12px; border:1px solid #93c5fd;">
                         🔵 렌트프리 (임대료 면제월)
                     </span>
-                    <span style="font-size:11px; color:#94a3b8; margin-left:4px;">※ 각 셀 위에 마우스를 올리면 상세 메모가 표시됩니다</span>
+                    <span style="font-size:11px; color:#94a3b8; margin-left:4px;">※ 셀 위에 마우스를 올리면 상세 메모 표시</span>
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -286,10 +324,11 @@ if not df_c.empty:
                     format_dict_krw[f"{m}월 임대료"] = fmt_krw
                     format_dict_krw[f"{m}월 관리비"] = fmt_krw
                 display_styled_table(
-                    df_rr_krw.drop(columns=["Contract_ID"]),
+                    df_rr_krw.drop(columns=["Contract_ID", "_change_map"], errors="ignore"),
                     freeze_cols=4,
                     format_dict=format_dict_krw,
                     custom_css=rr_css,
+                    change_map_col="_change_map" if "_change_map" in df_rr_krw.columns else None,
                 )
 
             if not df_rr_usd.empty:
@@ -310,10 +349,11 @@ if not df_c.empty:
                     format_dict_usd[f"{m}월 임대료"] = fmt_usd
                     format_dict_usd[f"{m}월 관리비"] = fmt_usd
                 display_styled_table(
-                    df_rr_usd.drop(columns=["Contract_ID"]),
+                    df_rr_usd.drop(columns=["Contract_ID", "_change_map"], errors="ignore"),
                     freeze_cols=4,
                     format_dict=format_dict_usd,
                     custom_css=rr_css,
+                    change_map_col="_change_map" if "_change_map" in df_rr_usd.columns else None,
                 )
         else:
             st.info(

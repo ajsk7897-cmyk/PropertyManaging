@@ -706,7 +706,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                 st.error("계약 면적은 0 이상이어야 합니다.")
             else:
                 # [UI 방어 로직] 계약 기간 중복 검증
-                from 모듈화.utils import check_contract_overlap
+                from utils import check_contract_overlap
                 overlap_found = False
                 exclude_id = None
                 if update_mode not in ["✨ 신규 계약", "🔄 계약 갱신"]:

@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 from utils import *
+from utils import _parse_rent_schedule
 
 st.header("렌트롤 (Rent Roll) 관리 및 수동 조정")
 st.markdown(

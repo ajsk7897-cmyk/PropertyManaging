@@ -17,10 +17,10 @@ pages = {
     ]
 }
 
-from utils import render_sidebar_notifications
+from utils import render_top_notifications
 
-with st.sidebar:
-    render_sidebar_notifications()
+render_top_notifications()
 
 pg = st.navigation(pages)
 pg.run()
+

@@ -816,8 +816,7 @@ def sort_df_by_asset_and_floor(df, asset_col="asset_name", floor_col="floor"):
     return df
 
 
-def render_sidebar_notifications():
-    st.header("🔔 D-180 만기 도래 알림 데스크")
+def render_top_notifications():
     df_active = fetch_data(
         "SELECT asset_name, floor, company_name, end_date FROM Lease_Contracts WHERE status = 'ACTIVE'"
     )
@@ -832,19 +831,39 @@ def render_sidebar_notifications():
         ].sort_values("d_day")
 
         if not df_expiring.empty:
+            badges_html = ""
             for _, row in df_expiring.iterrows():
                 if row["d_day"] <= 30:
-                    st.error(
-                        f"[{row['asset_name']}-{row['floor']}] {row['company_name']} (D-{row['d_day']}일)"
-                    )
+                    badges_html += f'<span style="padding: 4px 10px; background-color: #FEE2E2; color: #991B1B; border: 1px solid #FCA5A5; border-radius: 12px; font-size: 12px; font-weight: 600; white-space: nowrap;">🔴 [{row["asset_name"]}-{row["floor"]}] {row["company_name"]} (D-{row["d_day"]}일)</span>'
                 else:
-                    st.warning(
-                        f"[{row['asset_name']}-{row['floor']}] {row['company_name']} (D-{row['d_day']}일)"
-                    )
+                    badges_html += f'<span style="padding: 4px 10px; background-color: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; border-radius: 12px; font-size: 12px; font-weight: 600; white-space: nowrap;">🟠 [{row["asset_name"]}-{row["floor"]}] {row["company_name"]} (D-{row["d_day"]}일)</span>'
+
+            html_content = f"""
+            <div style="padding: 12px 16px; background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; margin-bottom: 24px; display: flex; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow-x: auto;">
+                <div style="font-weight: 700; color: #1E293B; margin-right: 20px; white-space: nowrap; font-size: 14px;">
+                    🔔 D-180 만기 도래 알림
+                </div>
+                <div style="display: flex; gap: 12px;">
+                    {badges_html}
+                </div>
+            </div>
+            """
+            st.markdown(html_content, unsafe_allow_html=True)
         else:
-            st.info("현재 6개월 내 만기 도래 계약이 없습니다.")
+            html_content = """
+            <div style="padding: 12px 16px; background-color: #F8FAFC; border: 1px dashed #CBD5E1; border-radius: 8px; margin-bottom: 24px; display: flex; align-items: center; color: #64748B;">
+                <span style="margin-right: 10px;">✅</span> <b>D-180 만기 도래 알림:</b> 현재 6개월 내 만기 도래 계약이 없습니다.
+            </div>
+            """
+            st.markdown(html_content, unsafe_allow_html=True)
     else:
-        st.info("현재 활성 계약이 없습니다.")
+        html_content = """
+        <div style="padding: 12px 16px; background-color: #F8FAFC; border: 1px dashed #CBD5E1; border-radius: 8px; margin-bottom: 24px; display: flex; align-items: center; color: #64748B;">
+            <span style="margin-right: 10px;">ℹ️</span> <b>D-180 만기 도래 알림:</b> 현재 활성 계약이 없습니다.
+        </div>
+        """
+        st.markdown(html_content, unsafe_allow_html=True)
+
 
 
 def get_months_between(start_date, end_date):

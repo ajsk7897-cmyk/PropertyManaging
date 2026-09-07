@@ -324,7 +324,7 @@ if not df_c.empty:
                     format_dict_krw[f"{m}월 임대료"] = fmt_krw
                     format_dict_krw[f"{m}월 관리비"] = fmt_krw
                 display_styled_table(
-                    df_rr_krw.drop(columns=["Contract_ID", "_change_map"], errors="ignore"),
+                    df_rr_krw.drop(columns=["Contract_ID"], errors="ignore"),
                     freeze_cols=4,
                     format_dict=format_dict_krw,
                     custom_css=rr_css,
@@ -349,7 +349,7 @@ if not df_c.empty:
                     format_dict_usd[f"{m}월 임대료"] = fmt_usd
                     format_dict_usd[f"{m}월 관리비"] = fmt_usd
                 display_styled_table(
-                    df_rr_usd.drop(columns=["Contract_ID", "_change_map"], errors="ignore"),
+                    df_rr_usd.drop(columns=["Contract_ID"], errors="ignore"),
                     freeze_cols=4,
                     format_dict=format_dict_usd,
                     custom_css=rr_css,

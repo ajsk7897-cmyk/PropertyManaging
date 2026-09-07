@@ -129,6 +129,9 @@ if not df_c.empty:
                             for period in schedule:
                                 s_date = pd.to_datetime(period["start_date"])
                                 e_date = pd.to_datetime(period["end_date"])
+                                
+                                if pd.isna(s_date) or pd.isna(e_date):
+                                    continue
                                     
                                 if s_date <= c_start <= e_date:
                                     current_rent = float(period.get("rent", 0.0))
@@ -310,10 +313,10 @@ if not df_c.empty:
                     col_r = f"{month}월 임대료"
                     col_m = f"{month}월 관리비"
                     df_rr_krw[col_r] = df_rr_krw[col_r].apply(
-                        lambda x: f"{int(float(x)):,}"
+                        lambda x: f"{int(float(x)):,}" if pd.notna(x) and str(x).strip() != "" else "0"
                     )
                     df_rr_krw[col_m] = df_rr_krw[col_m].apply(
-                        lambda x: f"{int(float(x)):,}"
+                        lambda x: f"{int(float(x)):,}" if pd.notna(x) and str(x).strip() != "" else "0"
                     )
                     col_config_krw[col_r] = st.column_config.TextColumn(
                         f"₩ {col_r}"
@@ -339,10 +342,10 @@ if not df_c.empty:
                     col_r = f"{month}월 임대료"
                     col_m = f"{month}월 관리비"
                     df_rr_usd[col_r] = df_rr_usd[col_r].apply(
-                        lambda x: f"{float(x):,.2f}"
+                        lambda x: f"{float(x):,.2f}" if pd.notna(x) and str(x).strip() != "" else "0.00"
                     )
                     df_rr_usd[col_m] = df_rr_usd[col_m].apply(
-                        lambda x: f"{float(x):,.2f}"
+                        lambda x: f"{float(x):,.2f}" if pd.notna(x) and str(x).strip() != "" else "0.00"
                     )
                     col_config_usd[col_r] = st.column_config.TextColumn(
                         f"USD {col_r}"

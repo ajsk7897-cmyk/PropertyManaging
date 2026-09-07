@@ -483,19 +483,18 @@ def center_styler(df):
         if 'TOTAL' in str(row.values):
             return styles
         
-        # 월별 임대료 컬럼 찾기 (숫자 오름차순으로 정렬되도록 주의 - 이미 데이터프레임 순서가 1~12월 순서임)
         rent_cols = [c for c in row.index if '월 임대료' in str(c) and str(c).replace('월 임대료', '').strip().isdigit()]
         
         for idx, col in enumerate(rent_cols):
             r_val = row[col]
+            m_col = str(col).replace('임대료', '관리비')
+            m_val = row[m_col] if m_col in row.index else 0
             try:
                 r_float = float(str(r_val).replace(',', ''))
+                m_float = float(str(m_val).replace(',', ''))
             except:
                 continue
             
-            if r_float <= 0:
-                continue
-                
             pr_float = 0
             if idx > 0:
                 try: pr_float = float(str(row[rent_cols[idx-1]]).replace(',', ''))
@@ -511,38 +510,38 @@ def center_styler(df):
                 try: ppr_float = float(str(row[rent_cols[idx-2]]).replace(',', ''))
                 except: pass
 
-            # 이전달 값이 존재하고 변동이 일어났을 경우
+            try:
+                col_idx = list(row.index).index(col)
+                m_idx = list(row.index).index(m_col) if m_col in row.index else None
+            except:
+                continue
+
+            # ① 렌트프리월: 임대료=0, 관리비>0, 이전달 임대료 있었음
+            if r_float <= 0 and m_float > 0 and pr_float > 0:
+                rf_style = 'background-color: #bfdbfe !important; font-weight: 700; color: #1e40af; data-tooltip: rr-rent-free'
+                styles[col_idx] = rf_style
+                if m_idx is not None:
+                    styles[m_idx] = rf_style
+                continue
+            
+            if r_float <= 0:
+                continue
+
+            # ② 정기인상/갱신월: 이전달 대비 임대료 변동
             if pr_float > 0 and abs(r_float - pr_float) > 1.0:
-                # 1. 만약 두 달 연속 올랐다면 (일할계산의 두번째 달) -> 하이라이트 패스!
                 if ppr_float > 0 and ((r_float > pr_float and pr_float > ppr_float) or (r_float < pr_float and pr_float < ppr_float)):
-                    pass 
+                    pass
                 else:
-                    # 2. 첫 번째 변동 달 (일반 인상이거나 일할계산 첫 달)
                     is_mid_month = False
                     if abs(next_r_float - r_float) > 1.0 and ((next_r_float > r_float and r_float > pr_float) or (next_r_float < r_float and r_float < pr_float)):
                         is_mid_month = True
                         
-                    # pandas styler는 CSS를 <style> 블록에 분리 생성하므로
-                    # 인라인 style에 title 직접 주입 불가. 대신 class명을 마커로 활용한다.
-                    # class 이름에 tooltip 종류를 인코딩해두고 HTML 후처리에서 title 어트리뷰트 삽입
                     tooltip_class = "rr-mid-month" if is_mid_month else "rr-renew"
-                    style_str = f'background-color: #dcfce3 !important; font-weight: 700; color: #166534;'
+                    style_str = f'background-color: #dcfce7 !important; font-weight: 700; color: #166534; data-tooltip: {tooltip_class}'
                     
-                    try:
-                        col_idx = list(row.index).index(col)
-                        styles[col_idx] = style_str
-                        m_col = str(col).replace('임대료', '관리비')
-                        if m_col in row.index:
-                            m_idx = list(row.index).index(m_col)
-                            styles[m_idx] = style_str
-                        # CSS 클래스를 부여하기 위해 styles에 클래스 마커 삽입
-                        # Pandas styler는 style 속성만 지원하므로 클래스 마커는
-                        # data-rr 속성을 style 값에 우회 삽입하여 후처리 시 활용
-                        styles[col_idx] = style_str + f'; data-tooltip: {tooltip_class}'
-                        if m_col in row.index:
-                            styles[m_idx] = style_str + f'; data-tooltip: {tooltip_class}'
-                    except:
-                        pass
+                    styles[col_idx] = style_str
+                    if m_idx is not None:
+                        styles[m_idx] = style_str
         return styles
 
     styler = df.style.apply(highlight_total_row, axis=1)
@@ -601,19 +600,18 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", hei
         if 'TOTAL' in str(row.values):
             return styles
         
-        # 월별 임대료 컬럼 찾기 (숫자 오름차순으로 정렬되도록 주의 - 이미 데이터프레임 순서가 1~12월 순서임)
         rent_cols = [c for c in row.index if '월 임대료' in str(c) and str(c).replace('월 임대료', '').strip().isdigit()]
         
         for idx, col in enumerate(rent_cols):
             r_val = row[col]
+            m_col = str(col).replace('임대료', '관리비')
+            m_val = row[m_col] if m_col in row.index else 0
             try:
                 r_float = float(str(r_val).replace(',', ''))
+                m_float = float(str(m_val).replace(',', ''))
             except:
                 continue
             
-            if r_float <= 0:
-                continue
-                
             pr_float = 0
             if idx > 0:
                 try: pr_float = float(str(row[rent_cols[idx-1]]).replace(',', ''))
@@ -629,38 +627,38 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", hei
                 try: ppr_float = float(str(row[rent_cols[idx-2]]).replace(',', ''))
                 except: pass
 
-            # 이전달 값이 존재하고 변동이 일어났을 경우
+            try:
+                col_idx = list(row.index).index(col)
+                m_idx = list(row.index).index(m_col) if m_col in row.index else None
+            except:
+                continue
+
+            # ① 렌트프리월: 임대료=0, 관리비>0, 이전달 임대료 있었음
+            if r_float <= 0 and m_float > 0 and pr_float > 0:
+                rf_style = 'background-color: #bfdbfe !important; font-weight: 700; color: #1e40af; data-tooltip: rr-rent-free'
+                styles[col_idx] = rf_style
+                if m_idx is not None:
+                    styles[m_idx] = rf_style
+                continue
+            
+            if r_float <= 0:
+                continue
+
+            # ② 정기인상/갱신월: 이전달 대비 임대료 변동
             if pr_float > 0 and abs(r_float - pr_float) > 1.0:
-                # 1. 만약 두 달 연속 올랐다면 (일할계산의 두번째 달) -> 하이라이트 패스!
                 if ppr_float > 0 and ((r_float > pr_float and pr_float > ppr_float) or (r_float < pr_float and pr_float < ppr_float)):
-                    pass 
+                    pass
                 else:
-                    # 2. 첫 번째 변동 달 (일반 인상이거나 일할계산 첫 달)
                     is_mid_month = False
                     if abs(next_r_float - r_float) > 1.0 and ((next_r_float > r_float and r_float > pr_float) or (next_r_float < r_float and r_float < pr_float)):
                         is_mid_month = True
                         
-                    # pandas styler는 CSS를 <style> 블록에 분리 생성하므로
-                    # 인라인 style에 title 직접 주입 불가. 대신 class명을 마커로 활용한다.
-                    # class 이름에 tooltip 종류를 인코딩해두고 HTML 후처리에서 title 어트리뷰트 삽입
                     tooltip_class = "rr-mid-month" if is_mid_month else "rr-renew"
-                    style_str = f'background-color: #dcfce3 !important; font-weight: 700; color: #166534;'
+                    style_str = f'background-color: #dcfce7 !important; font-weight: 700; color: #166534; data-tooltip: {tooltip_class}'
                     
-                    try:
-                        col_idx = list(row.index).index(col)
-                        styles[col_idx] = style_str
-                        m_col = str(col).replace('임대료', '관리비')
-                        if m_col in row.index:
-                            m_idx = list(row.index).index(m_col)
-                            styles[m_idx] = style_str
-                        # CSS 클래스를 부여하기 위해 styles에 클래스 마커 삽입
-                        # Pandas styler는 style 속성만 지원하므로 클래스 마커는
-                        # data-rr 속성을 style 값에 우회 삽입하여 후처리 시 활용
-                        styles[col_idx] = style_str + f'; data-tooltip: {tooltip_class}'
-                        if m_col in row.index:
-                            styles[m_idx] = style_str + f'; data-tooltip: {tooltip_class}'
-                    except:
-                        pass
+                    styles[col_idx] = style_str
+                    if m_idx is not None:
+                        styles[m_idx] = style_str
         return styles
 
     styler = df.style.apply(highlight_total_row, axis=1)
@@ -694,8 +692,10 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", hei
             tt = id_tooltip_map[td_id]
             if tt == 'rr-mid-month':
                 title = '📈 월 중간에 인상 (일할 계산 적용)'
+            elif tt == 'rr-rent-free':
+                title = '🎁 렌트프리 (임대료 면제 월)'
             else:
-                title = '🔄 계약 갱신 (변경)'
+                title = '📊 정기 인상 / 계약 갱신'
             return td_tag.replace('<td ', f'<td title="{title}" ')
         return td_tag
     html = _re.sub(r'<td id="(T_[\w]+)"', _add_title_to_td, html)

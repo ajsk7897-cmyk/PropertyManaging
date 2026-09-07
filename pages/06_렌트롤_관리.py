@@ -239,6 +239,21 @@ if not df_c.empty:
         )
 
         if view_mode == "👁️ 조회 모드 (완벽한 디자인 적용)":
+            st.markdown(
+                """
+                <div style="display:flex; gap:16px; align-items:center; margin-bottom:10px; flex-wrap:wrap;">
+                    <span style="font-size:12px; color:#64748b; font-weight:600;">📌 색상 범례</span>
+                    <span style="background-color:#dcfce7; color:#166534; font-weight:700; padding:3px 10px; border-radius:20px; font-size:12px; border:1px solid #86efac;">
+                        🟢 정기인상 / 계약갱신
+                    </span>
+                    <span style="background-color:#bfdbfe; color:#1e40af; font-weight:700; padding:3px 10px; border-radius:20px; font-size:12px; border:1px solid #93c5fd;">
+                        🔵 렌트프리 (임대료 면제월)
+                    </span>
+                    <span style="font-size:11px; color:#94a3b8; margin-left:4px;">※ 각 셀 위에 마우스를 올리면 상세 메모가 표시됩니다</span>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
             rr_css = """
             .custom-st-table.{uid} tr:nth-child(even) td:nth-child(odd):nth-child(n+5) { background-color: #e0f2fe !important; }
             .custom-st-table.{uid} tr:nth-child(odd) td:nth-child(odd):nth-child(n+5) { background-color: #f0f9ff !important; }

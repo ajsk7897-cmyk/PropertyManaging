@@ -522,8 +522,11 @@ def center_styler(df):
                     if abs(next_r_float - r_float) > 1.0 and ((next_r_float > r_float and r_float > pr_float) or (next_r_float < r_float and r_float < pr_float)):
                         is_mid_month = True
                         
-                    tooltip_tag = "/* tooltip: mid-month */" if is_mid_month else "/* tooltip: renew */"
-                    style_str = f'background-color: #dcfce3 !important; font-weight: 700; color: #166534; {tooltip_tag}'
+                    # pandas styler는 CSS를 <style> 블록에 분리 생성하므로
+                    # 인라인 style에 title 직접 주입 불가. 대신 class명을 마커로 활용한다.
+                    # class 이름에 tooltip 종류를 인코딩해두고 HTML 후처리에서 title 어트리뷰트 삽입
+                    tooltip_class = "rr-mid-month" if is_mid_month else "rr-renew"
+                    style_str = f'background-color: #dcfce3 !important; font-weight: 700; color: #166534;'
                     
                     try:
                         col_idx = list(row.index).index(col)
@@ -532,6 +535,12 @@ def center_styler(df):
                         if m_col in row.index:
                             m_idx = list(row.index).index(m_col)
                             styles[m_idx] = style_str
+                        # CSS 클래스를 부여하기 위해 styles에 클래스 마커 삽입
+                        # Pandas styler는 style 속성만 지원하므로 클래스 마커는
+                        # data-rr 속성을 style 값에 우회 삽입하여 후처리 시 활용
+                        styles[col_idx] = style_str + f'; data-tooltip: {tooltip_class}'
+                        if m_col in row.index:
+                            styles[m_idx] = style_str + f'; data-tooltip: {tooltip_class}'
                     except:
                         pass
         return styles
@@ -631,8 +640,11 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", hei
                     if abs(next_r_float - r_float) > 1.0 and ((next_r_float > r_float and r_float > pr_float) or (next_r_float < r_float and r_float < pr_float)):
                         is_mid_month = True
                         
-                    tooltip_tag = "/* tooltip: mid-month */" if is_mid_month else "/* tooltip: renew */"
-                    style_str = f'background-color: #dcfce3 !important; font-weight: 700; color: #166534; {tooltip_tag}'
+                    # pandas styler는 CSS를 <style> 블록에 분리 생성하므로
+                    # 인라인 style에 title 직접 주입 불가. 대신 class명을 마커로 활용한다.
+                    # class 이름에 tooltip 종류를 인코딩해두고 HTML 후처리에서 title 어트리뷰트 삽입
+                    tooltip_class = "rr-mid-month" if is_mid_month else "rr-renew"
+                    style_str = f'background-color: #dcfce3 !important; font-weight: 700; color: #166534;'
                     
                     try:
                         col_idx = list(row.index).index(col)
@@ -641,6 +653,12 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", hei
                         if m_col in row.index:
                             m_idx = list(row.index).index(m_col)
                             styles[m_idx] = style_str
+                        # CSS 클래스를 부여하기 위해 styles에 클래스 마커 삽입
+                        # Pandas styler는 style 속성만 지원하므로 클래스 마커는
+                        # data-rr 속성을 style 값에 우회 삽입하여 후처리 시 활용
+                        styles[col_idx] = style_str + f'; data-tooltip: {tooltip_class}'
+                        if m_col in row.index:
+                            styles[m_idx] = style_str + f'; data-tooltip: {tooltip_class}'
                     except:
                         pass
         return styles
@@ -660,8 +678,29 @@ def display_styled_table(df, freeze_cols=1, format_dict=None, custom_css="", hei
 
     uid = "tbl_" + uuid.uuid4().hex[:8]
     html = styler.to_html()
-    html = html.replace('/* tooltip: mid-month */"', '" title="월 중간에 인상 (일할 계산 적용)"')
-    html = html.replace('/* tooltip: renew */"', '" title="계약 갱신 (변경)"')
+    # Pandas Styler는 <style> 블록의 #ID 선택자로 스타일을 적용함.
+    # data-tooltip: rr-xxx 마커를 가진 ID를 <style>에서 찾아,
+    # 해당 <td id="..."> 에 title 어트리뷰트를 직접 삽입하는 방식 사용
+    import re as _re
+    # 스타일 블록에서 tooltip 마커가 있는 ID들 수집
+    id_tooltip_map = {}
+    for id_match, tooltip_val in _re.findall(r'#(T_[\w]+)\s*\{[^}]*data-tooltip:\s*(rr-[\w-]+)[^}]*\}', html):
+        id_tooltip_map[id_match] = tooltip_val
+    # td 태그에 title 삽입
+    def _add_title_to_td(m):
+        td_tag = m.group(0)
+        td_id = m.group(1)
+        if td_id in id_tooltip_map:
+            tt = id_tooltip_map[td_id]
+            if tt == 'rr-mid-month':
+                title = '📈 월 중간에 인상 (일할 계산 적용)'
+            else:
+                title = '🔄 계약 갱신 (변경)'
+            return td_tag.replace('<td ', f'<td title="{title}" ')
+        return td_tag
+    html = _re.sub(r'<td id="(T_[\w]+)"', _add_title_to_td, html)
+    # 스타일 블록에서 data-tooltip 가짜 CSS 속성 제거 (잘못된 CSS 오류 방지)
+    html = _re.sub(r'\s*data-tooltip:\s*rr-[\w-]+;', '', html)
 
     if freeze_cols == 4:
         freeze_css = f"""

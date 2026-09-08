@@ -44,6 +44,12 @@ if update_mode in ["🔄 계약 갱신", "📝 기존 계약 수정", "❌ 퇴�
     if update_mode == "🗑️ 계약 완전 삭제":
         df_for_selection = fetch_data("SELECT * FROM Lease_Contracts")
         warning_msg = "등록된 계약이 없습니다."
+    elif update_mode == "📝 기존 계약 수정":
+        # ACTIVE + TERMINATED(퇴점) 계약 모두 수정 가능
+        df_for_selection = fetch_data(
+            "SELECT * FROM Lease_Contracts WHERE status = 'ACTIVE' OR status IS NULL OR status = 'TERMINATED'"
+        )
+        warning_msg = "등록된 계약이 없습니다."
     else:
         df_for_selection = df_contracts_active
         warning_msg = "등록된 유효한(ACTIVE) 기존 계약이 없습니다."
@@ -80,6 +86,13 @@ if update_mode in ["🔄 계약 갱신", "📝 기존 계약 수정", "❌ 퇴�
         row_sel = df_for_selection[
             df_for_selection["contract_id"] == target_contract_id
         ].iloc[0]
+        
+        # 퇴점 계약 선택 시 안내 배너
+        if update_mode == "📝 기존 계약 수정" and row_sel.get("status") == "TERMINATED":
+            st.warning(
+                "⚠️ **퇴점(TERMINATED) 처리된 계약입니다.** 세부 정보(보증금, 임대료, 면적 등)를 수정할 수 있으며, 수정 후에도 퇴점 상태가 유지됩니다."
+                " 퇴점 상태를 해제하려면 계약 완전 삭제 후 재등록하거나 DB를 직접 수정하세요."
+            )
 
 # ------------------
 # 2) 퇴점 폼 렌더링
@@ -898,39 +911,78 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                         )
                             
                     elif update_mode == "📝 기존 계약 수정":
-                        c.execute(
-                            """
-                            UPDATE Lease_Contracts SET
-                                asset_name = %s, floor = %s, company_name = %s, contract_date = %s, start_date = %s, end_date = %s,
-                                contract_area = %s, contract_exclusive_area = %s, deposit = %s, monthly_rent = %s, monthly_maintenance_fee = %s,
-                                total_rent_free_months = %s, rent_free_details = %s,
-                                currency = %s, floor_details = %s, escalation_cycle_years = %s, rent_inc_rate = %s, maint_inc_rate = %s, rent_schedule = %s, remarks = %s
-                            WHERE contract_id = %s
-                        """,
-                            (
-                                asset_name,
-                                floor_str,
-                                company_name,
-                                contract_date.strftime("%Y-%m-%d"),
-                                start_date.strftime("%Y-%m-%d"),
-                                end_date.strftime("%Y-%m-%d"),
-                                float(contract_area),
-                                float(contract_exclusive_area),
-                                float(deposit),
-                                float(monthly_rent),
-                                float(monthly_maintenance_fee),
-                                total_rf_months,
-                                rf_details_json,
-                                currency,
-                                floor_details_json,
-                                escalation_cycle_years,
-                                rent_inc_rate,
-                                maint_inc_rate,
-                                rent_schedule_json,
-                                remarks,
-                                target_contract_id,
-                            ),
-                        )
+                        # 퇴점(TERMINATED) 계약 수정 시 status를 TERMINATED로 유지
+                        existing_status = row_sel.get("status", "ACTIVE")
+                        keep_terminated = (existing_status == "TERMINATED")
+                        
+                        if keep_terminated:
+                            c.execute(
+                                """
+                                UPDATE Lease_Contracts SET
+                                    asset_name = %s, floor = %s, company_name = %s, contract_date = %s, start_date = %s, end_date = %s,
+                                    contract_area = %s, contract_exclusive_area = %s, deposit = %s, monthly_rent = %s, monthly_maintenance_fee = %s,
+                                    total_rent_free_months = %s, rent_free_details = %s,
+                                    currency = %s, floor_details = %s, escalation_cycle_years = %s, rent_inc_rate = %s, maint_inc_rate = %s, rent_schedule = %s, remarks = %s
+                                WHERE contract_id = %s AND status = 'TERMINATED'
+                            """,
+                                (
+                                    asset_name,
+                                    floor_str,
+                                    company_name,
+                                    contract_date.strftime("%Y-%m-%d"),
+                                    start_date.strftime("%Y-%m-%d"),
+                                    end_date.strftime("%Y-%m-%d"),
+                                    float(contract_area),
+                                    float(contract_exclusive_area),
+                                    float(deposit),
+                                    float(monthly_rent),
+                                    float(monthly_maintenance_fee),
+                                    total_rf_months,
+                                    rf_details_json,
+                                    currency,
+                                    floor_details_json,
+                                    escalation_cycle_years,
+                                    rent_inc_rate,
+                                    maint_inc_rate,
+                                    rent_schedule_json,
+                                    remarks,
+                                    target_contract_id,
+                                ),
+                            )
+                        else:
+                            c.execute(
+                                """
+                                UPDATE Lease_Contracts SET
+                                    asset_name = %s, floor = %s, company_name = %s, contract_date = %s, start_date = %s, end_date = %s,
+                                    contract_area = %s, contract_exclusive_area = %s, deposit = %s, monthly_rent = %s, monthly_maintenance_fee = %s,
+                                    total_rent_free_months = %s, rent_free_details = %s,
+                                    currency = %s, floor_details = %s, escalation_cycle_years = %s, rent_inc_rate = %s, maint_inc_rate = %s, rent_schedule = %s, remarks = %s
+                                WHERE contract_id = %s
+                            """,
+                                (
+                                    asset_name,
+                                    floor_str,
+                                    company_name,
+                                    contract_date.strftime("%Y-%m-%d"),
+                                    start_date.strftime("%Y-%m-%d"),
+                                    end_date.strftime("%Y-%m-%d"),
+                                    float(contract_area),
+                                    float(contract_exclusive_area),
+                                    float(deposit),
+                                    float(monthly_rent),
+                                    float(monthly_maintenance_fee),
+                                    total_rf_months,
+                                    rf_details_json,
+                                    currency,
+                                    floor_details_json,
+                                    escalation_cycle_years,
+                                    rent_inc_rate,
+                                    maint_inc_rate,
+                                    rent_schedule_json,
+                                    remarks,
+                                    target_contract_id,
+                                ),
+                            )
                         c.execute(
                             """
                             INSERT INTO Contract_History (contract_id, action_type, action_date, action_month, details)
@@ -947,7 +999,10 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                         db_conn.close()
                         fetch_data.clear()
                         st.session_state["confirm_overlap_save"] = False
-                        st.success(f"✏️ '{company_name}' 기존 계약 정보가 성공적으로 수정(UPDATE)되었습니다.")
+                        if keep_terminated:
+                            st.success(f"✏️ '{company_name}' 퇴점 계약 세부 정보가 성공적으로 수정되었습니다. (퇴점 상태 유지)")
+                        else:
+                            st.success(f"✏️ '{company_name}' 기존 계약 정보가 성공적으로 수정(UPDATE)되었습니다.")
                         st.rerun()
 
                 except Exception as e:

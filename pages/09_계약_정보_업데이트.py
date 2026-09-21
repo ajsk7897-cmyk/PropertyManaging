@@ -227,6 +227,35 @@ elif update_mode == "🗑️ 계약 완전 삭제":
 # 4) 신규/갱신 폼 렌더링
 # ------------------
 elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계약 수정"]:
+    st.markdown("---")
+    st.markdown("#### 🤖 AI 계약서 자동 입력 (선택사항)")
+    uploaded_contract = st.file_uploader("계약서 스캔본(PDF/이미지) 혹은 원본 파일(Word)을 업로드하시면 AI가 계약 정보를 자동으로 추출합니다.", type=["pdf", "png", "jpg", "jpeg", "docx"])
+    if uploaded_contract:
+         if st.button("✨ AI로 계약서 분석하기", type="primary"):
+            with st.spinner("AI가 계약서를 꼼꼼히 읽고 있습니다. (약 10~30초 소요)"):
+                try:
+                    from ai_utils import extract_contract_info
+                    extracted = extract_contract_info(uploaded_contract)
+                    if extracted:
+                        st.session_state["ai_extracted"] = extracted
+                        # multiselect 위젯은 default 파라미터를 키가 이미 존재하면 무시하므로,
+                        # 위젯 키의 세션 상태를 직접 강제로 설정해야 렌트프리 월이 반영됨
+                        rf_months = extracted.get("rent_free_months", [])
+                        if isinstance(rf_months, list) and len(rf_months) > 0:
+                            ks = f"_{target_contract_id}" if update_mode != "✨ 신규 계약" else "_new"
+                            st.session_state[f"rf_months{ks}"] = rf_months
+                        st.toast("✅ 계약 정보 추출 완료! 아래 폼에 반영되었습니다.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"오류: {e}")
+    
+    # 폼 모드 전환 시 이전 세션 상태 초기화
+    if "prev_update_mode" not in st.session_state or st.session_state["prev_update_mode"] != update_mode:
+        st.session_state["ai_extracted"] = {}
+        st.session_state["prev_update_mode"] = update_mode
+
+    ai_data = st.session_state.get("ai_extracted", {})
+
     default_vals = {
         "asset_name": asset_list[0],
         "floor": "",
@@ -241,7 +270,9 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
         "maint": 0,
         "rf_details": [],
         "floor_details": {},
-        "remarks": ""
+        "remarks": "",
+        "rent_schedule": "",
+        "currency": "KRW"
     }
 
     if update_mode in ["🔄 계약 갱신", "📝 기존 계약 수정"]:
@@ -293,6 +324,48 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
         default_vals["deposit"] = int(row_sel["deposit"])
         default_vals["rent"] = int(row_sel["monthly_rent"])
         default_vals["maint"] = int(row_sel["monthly_maintenance_fee"])
+        default_vals["currency"] = str(row_sel.get("currency", "KRW"))
+
+    # AI 추출 데이터가 있으면 기존(혹은 기본)값을 덮어씁니다.
+    if ai_data:
+        try:
+            if ai_data.get("company_name"): 
+                if update_mode == "✨ 신규 계약":
+                    default_vals["company"] = ai_data["company_name"]
+                else:
+                    if ai_data["company_name"].strip() != default_vals["company"].strip():
+                        st.warning(f"⚠️ AI가 추출한 업체명('{ai_data['company_name']}')과 기존 등록된 업체명('{default_vals['company']}')이 다릅니다. 기존 데이터와의 연결성(동일 임차인 인식)을 위해 기존 업체명으로 고정됩니다.")
+            if ai_data.get("contract_area"): default_vals["area"] = ai_data["contract_area"]
+            if ai_data.get("exclusive_area"): default_vals["exclusive_area"] = ai_data["exclusive_area"]
+            if ai_data.get("contract_date"): default_vals["c_date"] = datetime.strptime(ai_data["contract_date"], "%Y-%m-%d").date()
+            if ai_data.get("start_date"): default_vals["s_date"] = datetime.strptime(ai_data["start_date"], "%Y-%m-%d").date()
+            if ai_data.get("end_date"): default_vals["e_date"] = datetime.strptime(ai_data["end_date"], "%Y-%m-%d").date()
+            if ai_data.get("deposit"): default_vals["deposit"] = ai_data["deposit"]
+            if ai_data.get("monthly_rent"): default_vals["rent"] = ai_data["monthly_rent"]
+            if ai_data.get("monthly_maintenance_fee"): default_vals["maint"] = ai_data["monthly_maintenance_fee"]
+            if ai_data.get("rent_free_months") and isinstance(ai_data["rent_free_months"], list) and len(ai_data["rent_free_months"]) > 0: 
+                default_vals["rf_details"] = ai_data["rent_free_months"]
+            elif ai_data.get("total_rent_free_months") and int(ai_data["total_rent_free_months"]) > 0:
+                # AI가 렌트프리 개월 수만 추출한 경우, 계약 시작일부터 자동 생성
+                try:
+                    rf_start = datetime.strptime(ai_data.get("start_date", ""), "%Y-%m-%d").date()
+                    rf_count = int(ai_data["total_rent_free_months"])
+                    generated_rf = []
+                    for i in range(rf_count):
+                        m = rf_start.month + i
+                        y = rf_start.year + (m - 1) // 12
+                        m = ((m - 1) % 12) + 1
+                        generated_rf.append(f"{y:04d}-{m:02d}")
+                    default_vals["rf_details"] = generated_rf
+                except:
+                    pass
+            if ai_data.get("remarks"): 
+                existing_remarks = default_vals.get("remarks", "")
+                default_vals["remarks"] = f"{existing_remarks}\n[AI 추출 특약]\n{ai_data['remarks']}".strip() if existing_remarks else ai_data['remarks']
+            if ai_data.get("rent_schedule"): default_vals["rent_schedule"] = json.dumps(ai_data["rent_schedule"])
+            if ai_data.get("currency"): default_vals["currency"] = ai_data["currency"]
+        except Exception as e:
+            st.warning(f"AI 데이터 바인딩 중 일부 오류가 발생했습니다: {e}")
 
     key_suffix = f"_{target_contract_id}" if update_mode != "✨ 신규 계약" else "_new"
 
@@ -314,9 +387,8 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
             )
         with col_t2:
             idx_curr = 0
-            if update_mode in ["🔄 계약 갱신", "📝 기존 계약 수정"]:
-                if "USD" in str(row_sel.get("currency", "")):
-                    idx_curr = 1
+            if "USD" in default_vals["currency"]:
+                idx_curr = 1
             currency = st.radio("계약 통화", ["KRW", "USD"], index=idx_curr, horizontal=True)
 
         st.markdown("---")
@@ -503,10 +575,22 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
             ]
             
         df_schedule = pd.DataFrame(schedule_list)
+        # 컬럼 순서 강제: 시작일 → 종료일 → 임대료 → 관리비
+        desired_order = ["start_date", "end_date", "rent", "maint"]
+        existing_cols = [c for c in desired_order if c in df_schedule.columns]
+        extra_cols = [c for c in df_schedule.columns if c not in desired_order]
+        df_schedule = df_schedule[existing_cols + extra_cols]
+        
         edited_schedule_df = st.data_editor(
             df_schedule,
             num_rows="dynamic",
             use_container_width=True,
+            column_config={
+                "start_date": st.column_config.TextColumn("시작일"),
+                "end_date": st.column_config.TextColumn("종료일"),
+                "rent": st.column_config.NumberColumn("임대료", format="%d"),
+                "maint": st.column_config.NumberColumn("관리비", format="%d"),
+            },
             key=f"rent_schedule_editor{key_suffix}"
         )
             

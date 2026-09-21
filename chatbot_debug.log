@@ -1,0 +1,54 @@
+USER: 본점 10월 렌트프리 업체
+QUERY: SELECT company_name, asset_name, floor, contract_id, rent_free_details FROM lease_contracts WHERE status = 'ACTIVE' AND asset_name ILIKE '%본점%' AND rent_free_details IS NOT NULL AND rent_free_details ILIKE '%2026-10%';
+
+USER: 본점 다음달 렌트프리 업체 알려줘
+QUERY: SELECT company_name FROM lease_contracts WHERE asset_name ILIKE '%본점%' AND status = 'ACTIVE' AND rent_free_details ILIKE '%2026-10%'
+
+USER: 본점 26년 10월 렌트프리 업체 알려줘
+QUERY: SELECT company_name, asset_name, floor, rent_free_details 
+FROM lease_contracts 
+WHERE asset_name ILIKE '%본점%' 
+  AND status = 'ACTIVE' 
+  AND rent_free_details ILIKE '%2026-10%'
+
+USER: 본점 다음달 렌트프리 업체 알려줘
+QUERY: SELECT company_name, asset_name, floor, rent_free_details FROM lease_contracts WHERE asset_name ILIKE '%본점%' AND status = 'ACTIVE' AND rent_free_details ILIKE '%2026-10%'
+
+USER: 10월 본점 렌트프리 업체 알려줘
+QUERY: SELECT company_name FROM lease_contracts WHERE asset_name ILIKE '%본점%' AND status = 'ACTIVE' AND (rent_free_details ILIKE '%-10%' OR rent_free_details ILIKE '%10월%')
+
+USER: 26년 10월 hq빌딩 렌트프리 업체 알려줘
+QUERY: SELECT company_name FROM lease_contracts WHERE asset_name ILIKE '%hq빌딩%' AND status = 'ACTIVE' AND rent_free_details ILIKE '%2026-10%'
+
+USER: 10월 본점 렌트프리 업체 알려줘
+QUERY: SELECT company_name FROM lease_contracts WHERE asset_name ILIKE '%본점%' AND status = 'ACTIVE' AND (rent_free_details ILIKE '%-10%' OR rent_free_details ILIKE '%2026-10%')
+
+USER: hq building 26년 10월 렌트프리 업체
+QUERY: SELECT company_name FROM lease_contracts WHERE asset_name ILIKE '%hq building%' AND status = 'ACTIVE' AND rent_free_details ILIKE '%"2026-10"%';
+
+USER: 10월 본점 렌트프리 업체 알려줘
+QUERY: SELECT company_name 
+FROM lease_contracts 
+WHERE asset_name ILIKE '%본점%' 
+  AND status = 'ACTIVE' 
+  AND (rent_free_details ILIKE '%-10%' OR rent_free_details ILIKE '%2026-10%')
+
+USER: 26년 10월 본점 렌트프리 업체 알려줘
+QUERY: SELECT company_name, asset_name, floor, rent_free_details FROM lease_contracts WHERE status = 'ACTIVE' AND asset_name ILIKE '%본점%' AND rent_free_details ILIKE '%2026-10%'
+
+USER: `0월 본점 렌트프리
+FINAL QUERY: SELECT company_name FROM lease_contracts WHERE (asset_name ILIKE '%HQ%' OR asset_name ILIKE '%HQ%') AND status = 'ACTIVE' AND rent_free_details ILIKE '%10월%'
+
+USER: 10월 본점 렌트프리
+FINAL QUERY: SELECT company_name, asset_name, floor, start_date, end_date, rent_free_details FROM lease_contracts WHERE asset_name ILIKE '%HQ%' AND status = 'ACTIVE' AND rent_free_details ILIKE '%2026-10%'
+
+USER: 10월 본점 렌트프리
+FINAL QUERY: SELECT * FROM lease_contracts WHERE asset_name ILIKE '%HQ%' AND rent_free_details ILIKE '%10%' AND status = 'ACTIVE'
+
+USER: 10월 본점 렌트프리 업체
+FINAL QUERY: SELECT company_name, asset_name, floor, rent_free_details 
+FROM lease_contracts 
+WHERE (asset_name ILIKE '%HQ%' OR asset_name ILIKE '%HQ%') 
+  AND status = 'ACTIVE' 
+  AND rent_free_details ILIKE '%10월%'
+

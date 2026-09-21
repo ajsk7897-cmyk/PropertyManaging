@@ -18,8 +18,10 @@ pages = {
 }
 
 from utils import render_top_notifications
+from chatbot_ui import render_chatbot
 
 render_top_notifications()
+render_chatbot()
 
 pg = st.navigation(pages)
 pg.run()

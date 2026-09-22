@@ -395,6 +395,146 @@ def compare_revenue(entity_name: str, entity_type: str, compare_type: str, base_
     except Exception as e:
         return f"오류 발생! 절대 재시도하지 말고 사용자에게 사과하세요. 상세: {e}"
 
+def get_deposit_return_schedule(months_ahead: int = 3) -> str:
+    '''
+    향후 N개월 이내에 만기가 도래하여 반환해야 할 보증금 총액과 계약 목록을 조회합니다.
+    '''
+    limit_msg = _check_global_tool_limit()
+    if limit_msg: return limit_msg
+
+    try:
+        conn = get_db_connection()
+        query = f"""
+            SELECT asset_name, floor, company_name, end_date, deposit
+            FROM lease_contracts
+            WHERE status = 'ACTIVE' 
+              AND end_date <= CURRENT_DATE + INTERVAL '{months_ahead} months'
+              AND end_date >= CURRENT_DATE
+            ORDER BY end_date ASC
+        """
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        
+        if df.empty:
+            return f"향후 {months_ahead}개월 이내에 반환 예정인 보증금이 없습니다."
+            
+        total_deposit = df['deposit'].sum()
+        res = f"[향후 {months_ahead}개월 내 보증금 반환 예정액: {total_deposit:,.0f}원]\n\n"
+        res += df.to_markdown()
+        return res
+    except Exception as e:
+        return f"오류 발생! 상세: {e}"
+
+def get_rent_per_pyung(entity_name: str, entity_type: str) -> str:
+    '''
+    특정 자산(asset) 전체 또는 임차인(company)의 계약 면적 대비 평당 임대료와 평당 관리비를 계산합니다.
+    entity_type은 "asset" 또는 "company" 중 하나여야 합니다.
+    '''
+    limit_msg = _check_global_tool_limit()
+    if limit_msg: return limit_msg
+
+    try:
+        conn = get_db_connection()
+        query = """
+            SELECT asset_name, floor, company_name, contract_area, monthly_rent, monthly_maintenance_fee
+            FROM lease_contracts
+            WHERE status = 'ACTIVE'
+        """
+        if entity_type.lower() == "asset":
+            import re
+            asset_name_aliases = {
+                r'본점|본사|에이치큐|hq빌딩|hq building|hq': 'HQ',
+                r'부산': 'Busan', r'둔산': 'Dunsan', r'광주': 'Gwangju',
+                r'잠실': 'Jamsilseo', r'송파': 'Songpa', r'철산': 'Cheolsan Town',
+                r'춘천': 'Chuncheon', r'분당': 'Bundang', r'포항': 'Pohang',
+                r'대전': 'Daejeon', r'침산': 'Chimsan-dong',
+            }
+            mapped_asset = entity_name
+            for pattern, real_key in asset_name_aliases.items():
+                if re.search(pattern, entity_name, re.IGNORECASE):
+                    mapped_asset = real_key
+                    break
+            query += f" AND asset_name ILIKE '%%{mapped_asset}%%'"
+        elif entity_type.lower() == "company":
+            query += f" AND company_name ILIKE '%%{entity_name}%%'"
+        else:
+            return "entity_type은 'asset' 또는 'company'여야 합니다."
+            
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        
+        if df.empty:
+            return f"해당 {entity_type}에 대한 활성 계약 정보가 없습니다."
+            
+        total_area_sqm = df['contract_area'].sum()
+        total_area_py = total_area_sqm / 3.3058
+        total_rent = df['monthly_rent'].sum()
+        total_maint = df['monthly_maintenance_fee'].sum()
+        
+        if total_area_py <= 0:
+            return "계약 면적이 0이어서 평당 단가를 계산할 수 없습니다."
+            
+        rent_per_py = total_rent / total_area_py
+        maint_per_py = total_maint / total_area_py
+        
+        res = f"[{entity_name} 평당 단가 분석]\n"
+        res += f"- 총 계약면적: {total_area_sqm:,.2f}㎡ ({total_area_py:,.2f}평)\n"
+        res += f"- 총 월임대료: {total_rent:,.0f}원\n"
+        res += f"- 총 월관리비: {total_maint:,.0f}원\n"
+        res += f"- 평당 임대료: {rent_per_py:,.0f}원/평\n"
+        res += f"- 평당 관리비: {maint_per_py:,.0f}원/평\n"
+        res += f"- NOC(평당 총비용): {(rent_per_py + maint_per_py):,.0f}원/평\n"
+        return res
+    except Exception as e:
+        return f"오류 발생! 상세: {e}"
+
+def get_current_rent_free_impact(year: int, month: int) -> str:
+    '''
+    특정 연월(예: 2026년 10월)에 렌트프리를 적용받는 계약들의 목록과 차감된 총 임대료(기회비용)를 계산합니다.
+    '''
+    limit_msg = _check_global_tool_limit()
+    if limit_msg: return limit_msg
+
+    try:
+        from utils import _is_rent_free_month, _parse_rent_free_details
+        conn = get_db_connection()
+        query = "SELECT asset_name, floor, company_name, start_date, end_date, monthly_rent, rent_free_details FROM lease_contracts WHERE status = 'ACTIVE'"
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        
+        impact_list = []
+        total_impact = 0
+        
+        for _, row in df.iterrows():
+            rf_details = row['rent_free_details']
+            start_d = row['start_date']
+            end_d = row['end_date']
+            if not rf_details or pd.isna(rf_details): continue
+            
+            parsed = _parse_rent_free_details(rf_details)
+            if not parsed: continue
+            
+            if _is_rent_free_month(year, month, start_d, end_d, parsed):
+                rent = row['monthly_rent']
+                total_impact += rent
+                impact_list.append({
+                    "자산": row['asset_name'],
+                    "임차인": row['company_name'],
+                    "월임대료_차감액": rent,
+                    "렌트프리조건": rf_details
+                })
+        
+        if not impact_list:
+            return f"{year}년 {month}월에 렌트프리가 적용되는 계약이 없습니다."
+            
+        res_df = pd.DataFrame(impact_list)
+        res = f"[{year}년 {month}월 렌트프리 기회비용 분석]\n"
+        res += f"- 렌트프리로 인해 감소한 임대료 총액: {total_impact:,.0f}원\n\n"
+        res += res_df.to_markdown()
+        return res
+    except Exception as e:
+        return f"오류 발생! 상세: {e}"
+
 def get_gemini_api_key():
     try:
         if "GEMINI_API_KEY" in st.secrets:
@@ -432,9 +572,12 @@ def generate_chat_response(user_message, chat_history):
 3. 향후 만기가 도래하는 계약 목록은 `get_expiring_contracts`를 사용하세요.
 4. 수익 비교(전월 대비, 전년 대비, 임의의 달 비교) 질문은 반드시 `compare_revenue`를 사용하세요. (임의의 달 비교시에는 compare_type을 'Custom'으로 설정하고 target_year와 target_month를 명시하세요.)
 5. 연간 임대료 수입, 렌트롤 총합 등 일반적인 계산은 `get_annual_rent_roll`을 사용하세요.
-6. 위 도구들로 해결되지 않는 단순 통계나 기타 조건 검색은 `execute_sql_query`를 사용하세요. (DB 스키마:\n{get_db_schema()})
-7. 도구를 호출하여 조회된 결과를 바탕으로 사용자에게 친절하고 이해하기 쉬운 한글 자연어로 답변을 작성하세요.
-8. 도구 호출은 최대 5회까지만 가능합니다. 5회 안에 답을 완성하지 못하면 사용자에게 솔직히 말하세요.
+6. [신규] 보증금 반환 일정 및 향후 반환해야 할 보증금 규모는 `get_deposit_return_schedule`을 사용하세요.
+7. [신규] 특정 자산이나 업체의 평당 임대료/관리비 단가 분석은 `get_rent_per_pyung`을 사용하세요.
+8. [신규] 특정 월의 렌트프리 적용 업체 목록과 이로 인한 기회비용(감소한 임대료)은 `get_current_rent_free_impact`를 사용하세요.
+9. 위 도구들로 해결되지 않는 단순 통계나 기타 조건 검색은 `execute_sql_query`를 사용하세요. (DB 스키마:\n{get_db_schema()})
+10. 도구를 호출하여 조회된 결과를 바탕으로 사용자에게 친절하고 이해하기 쉬운 한글 자연어로 답변을 작성하세요.
+11. 도구 호출은 최대 5회까지만 가능합니다. 5회 안에 답을 완성하지 못하면 사용자에게 솔직히 말하세요.
 '''
 
     # 사용 가능한 도구 맵 (이름 -> 함수)
@@ -445,6 +588,9 @@ def generate_chat_response(user_message, chat_history):
         "get_vacancy_status": get_vacancy_status,
         "get_expiring_contracts": get_expiring_contracts,
         "compare_revenue": compare_revenue,
+        "get_deposit_return_schedule": get_deposit_return_schedule,
+        "get_rent_per_pyung": get_rent_per_pyung,
+        "get_current_rent_free_impact": get_current_rent_free_impact,
     }
 
     # google.genai용 도구 정의

@@ -4,4 +4,5 @@ openpyxl
 SQLAlchemy
 psycopg2-binary
 plotly
+google-genai
 google-generativeai

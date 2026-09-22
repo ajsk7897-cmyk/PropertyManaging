@@ -677,5 +677,7 @@ def generate_chat_response(user_message, chat_history):
     except Exception as e:
         error_msg = str(e)
         if "429" in error_msg or "quota" in error_msg.lower():
-            return "죄송합니다. API 사용량이 초과되었습니다. 잠시 후(약 1분) 다시 시도해 주세요."
+            return "죄송합니다. 무료 API 사용량이 초과되었습니다. 잠시 후(약 1분) 다시 질문해 주세요."
+        if "503" in error_msg or "unavailable" in error_msg.lower():
+            return "죄송합니다. 현재 구글 AI 서버(Gemini)에 전 세계적인 접속자가 몰려 일시적으로 응답이 지연되고 있습니다. 10초 정도 후에 다시 질문해 주시면 정상 작동할 것입니다."
         return f"죄송합니다. 답변을 생성하는 도중 오류가 발생했습니다: {e}"

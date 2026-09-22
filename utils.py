@@ -1286,3 +1286,186 @@ def get_actual_monthly_rent_by_company(df_contracts_all, asset_name, floor, comp
 # Tab 0: 마스터 대시보드
 
 # ==========================================
+
+
+
+def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None):
+    import pandas as pd
+    from datetime import datetime, timedelta
+    import json
+    import calendar
+    
+    df_c = fetch_data("SELECT * FROM Lease_Contracts")
+    if df_c.empty:
+        return pd.DataFrame(), {}
+        
+    if sel_assets:
+        df_c = df_c[df_c["asset_name"].isin(sel_assets)]
+    if sel_companies:
+        df_c = df_c[df_c["company_name"].isin(sel_companies)]
+
+    df_overrides = fetch_data(f"SELECT * FROM RentRoll_Overrides WHERE year = {selected_year}")
+    overrides_dict = {}
+    for _, ov in df_overrides.iterrows():
+        overrides_dict[(ov["contract_id"], ov["floor"], ov["month"])] = (
+            ov["over_rent"],
+            ov["over_maint"],
+        )
+
+    records_dict = {}
+    for _, row in df_c.iterrows():
+        try:
+            start = pd.to_datetime(row["start_date"])
+            end = pd.to_datetime(row["end_date"])
+
+            year_start = datetime(selected_year, 1, 1)
+            year_end = datetime(selected_year, 12, 31)
+            if start > year_end or end < year_start:
+                continue
+
+            rf_details = json.loads(row["rent_free_details"]) if row["rent_free_details"] else []
+
+            floor_name_unified = row["floor"]
+            company_clean = row["company_name"]
+            currency_val = row["currency"] if "currency" in row and pd.notnull(row["currency"]) else "KRW"
+            group_key = (row["asset_name"], floor_name_unified, company_clean, currency_val)
+
+            start_month = 6 if selected_year == 2026 else 1
+
+            if group_key not in records_dict:
+                records_dict[group_key] = {
+                    "Contract_ID": row["contract_id"],
+                    "자산명": row["asset_name"],
+                    "층": floor_name_unified,
+                    "업체명": company_clean,
+                    "통화": currency_val,
+                    "_change_map": {},
+                }
+                for m in range(start_month, 13):
+                    records_dict[group_key][f"{m}월 임대료"] = 0.0
+                    records_dict[group_key][f"{m}월 관리비"] = 0.0
+
+            if row["status"] == "ACTIVE":
+                records_dict[group_key]["Contract_ID"] = row["contract_id"]
+            
+            is_renewed_contract = (row["status"] == "RENEWED")
+
+            for month in range(start_month, 13):
+                month_str = f"{selected_year}-{month:02d}"
+                _, last_day = calendar.monthrange(selected_year, month)
+                curr_month_start = datetime(selected_year, month, 1)
+                curr_month_end = datetime(selected_year, month, last_day)
+
+                initial_rent = float(row.get("monthly_rent", 0.0) or 0.0)
+                initial_maint = float(row.get("monthly_maintenance_fee", 0.0) or 0.0)
+                rent_schedule_json = row.get("rent_schedule", None)
+                currency = row.get("currency", "KRW")
+
+                overlap_start = max(start, curr_month_start)
+                overlap_end = min(end, curr_month_end)
+                    
+                rent_to_charge_total = 0.0
+                maint_to_charge_total = 0.0
+
+                if overlap_start <= overlap_end:
+                    is_rf = month_str in (rf_details or [])
+                    schedule = _parse_rent_schedule(rent_schedule_json)
+                        
+                    if not schedule:
+                        overlap_days = (overlap_end - overlap_start).days + 1
+                        rent_to_charge_total = 0.0 if is_rf else (initial_rent * overlap_days / last_day)
+                        maint_to_charge_total = (initial_maint * overlap_days / last_day)
+                    else:
+                        c_start = overlap_start
+                        last_known_rent = initial_rent
+                        last_known_maint = initial_maint
+                            
+                        while c_start <= overlap_end:
+                            current_rent = last_known_rent
+                            current_maint = last_known_maint
+                            next_change_date = overlap_end + timedelta(days=1)
+                                
+                            for period in schedule:
+                                s_date = pd.to_datetime(period["start_date"])
+                                e_date = pd.to_datetime(period["end_date"])
+                                
+                                if pd.isna(s_date) or pd.isna(e_date):
+                                    continue
+                                    
+                                if s_date <= c_start <= e_date:
+                                    current_rent = float(period.get("rent", 0.0))
+                                    current_maint = float(period.get("maint", 0.0))
+                                    next_change_date = min(next_change_date, e_date + timedelta(days=1))
+                                    break
+                                elif c_start < s_date:
+                                    next_change_date = min(next_change_date, s_date)
+                                elif c_start > e_date:
+                                    last_known_rent = float(period.get("rent", 0.0))
+                                    last_known_maint = float(period.get("maint", 0.0))
+                                
+                            c_end = min(overlap_end, next_change_date - timedelta(days=1))
+                            days = (c_end - c_start).days + 1
+                                
+                            rent_to_charge_total += 0.0 if is_rf else (current_rent * days / last_day)
+                            maint_to_charge_total += (current_maint * days / last_day)
+                                
+                            c_start = c_end + timedelta(days=1)
+                else:
+                    rent_to_charge_total = 0
+                    maint_to_charge_total = 0
+
+                if (row["contract_id"], floor_name_unified, month) in overrides_dict:
+                    o_rent, o_maint = overrides_dict[(row["contract_id"], floor_name_unified, month)]
+                    floor_rent = o_rent
+                    floor_maint = o_maint
+                else:
+                    floor_rent = rent_to_charge_total
+                    floor_maint = maint_to_charge_total
+
+                if currency != "KRW":
+                    floor_rent = round(floor_rent, 2)
+                    floor_maint = round(floor_maint, 2)
+
+                records_dict[group_key][f"{month}월 임대료"] += floor_rent
+                records_dict[group_key][f"{month}월 관리비"] += floor_maint
+                
+                if currency != "KRW":
+                    records_dict[group_key][f"{month}월 임대료"] = round(records_dict[group_key][f"{month}월 임대료"], 2)
+                    records_dict[group_key][f"{month}월 관리비"] = round(records_dict[group_key][f"{month}월 관리비"], 2)
+
+                if floor_rent > 0 or floor_maint > 0:
+                    change_map = records_dict[group_key]["_change_map"]
+                    if is_renewed_contract:
+                        if month not in change_map:
+                            change_map[month] = 'renew'
+                    else:
+                        schedule = _parse_rent_schedule(row.get("rent_schedule", None))
+                        if schedule:
+                            from datetime import timedelta as _td
+                            for period in schedule:
+                                try:
+                                    s_date = pd.to_datetime(period["start_date"])
+                                    if not pd.isna(s_date) and s_date.year == selected_year and s_date.month == month and s_date.day > 1:
+                                        if month not in change_map:
+                                            change_map[month] = 'increase'
+                                except:
+                                    pass
+                            for period in schedule:
+                                try:
+                                    s_date = pd.to_datetime(period["start_date"])
+                                    if not pd.isna(s_date) and s_date.year == selected_year and s_date.month == month and s_date.day == 1:
+                                        if month not in change_map:
+                                            change_map[month] = 'increase'
+                                except:
+                                    pass
+
+        except Exception as e:
+            pass
+
+    records = list(records_dict.values())
+    if records:
+        df_rr = pd.DataFrame(records)
+        df_rr = sort_df_by_asset_and_floor(df_rr, "자산명", "층")
+        return df_rr, overrides_dict
+    return pd.DataFrame(), overrides_dict
+

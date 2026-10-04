@@ -57,42 +57,53 @@ class ContractExtractionResult(BaseModel):
     rent_free_months: List[str] = Field(description="렌트프리가 적용되는 월들의 목록. 'YYYY-MM' 형식의 문자열 리스트. 없으면 빈 리스트.")
     remarks: str = Field(description="납부 주기(예: 분기납), 인상 조건, 위약벌, 기타 계약상 특별히 명시된 특약사항이나 특이사항 종합. 없으면 빈 문자열")
 
-def extract_contract_info(uploaded_file) -> Optional[dict]:
-    """업로드된 파일(PDF/Image)에서 계약 정보를 추출합니다."""
+def extract_contract_info(uploaded_files) -> Optional[dict]:
+    """업로드된 파일(PDF/Image/Word)에서 계약 정보를 추출합니다.
+
+    uploaded_files: 단일 UploadedFile 객체 또는 UploadedFile 리스트.
+    하나의 계약서가 여러 장의 이미지/파일로 쪼개져 업로드된 경우에도
+    모든 파일을 함께 AI에 전달하여 하나의 계약 정보로 종합 추출합니다.
+    """
     setup_gemini()
-    
+
+    # 단일 파일도 리스트로 통일 처리 (하위 호환)
+    if not isinstance(uploaded_files, (list, tuple)):
+        uploaded_files = [uploaded_files]
+
     try:
         # File API 대신 Inline Data 방식을 사용하여 Discovery API 에러(AQ. 키 포맷 에러) 원천 차단
-        file_name = uploaded_file.name.lower()
-        
-        if file_name.endswith(".docx"):
-            import docx
-            import io
-            doc = docx.Document(io.BytesIO(uploaded_file.getvalue()))
-            text_content = "\n".join([paragraph.text for paragraph in doc.paragraphs])
-            
-            file_data = {
-                "mime_type": "text/plain",
-                "data": text_content.encode("utf-8")
-            }
-        else:
-            mime_type = uploaded_file.type
-            if not mime_type:
-                # 기본값 설정
-                if file_name.endswith(".pdf"):
-                    mime_type = "application/pdf"
-                elif file_name.endswith((".jpg", ".jpeg")):
-                    mime_type = "image/jpeg"
-                elif file_name.endswith(".png"):
-                    mime_type = "image/png"
-                else:
-                    mime_type = "application/pdf"
+        file_parts = []
+        for uploaded_file in uploaded_files:
+            file_name = uploaded_file.name.lower()
 
-            file_data = {
-                "mime_type": mime_type,
-                "data": uploaded_file.getvalue()
-            }
-        
+            if file_name.endswith(".docx"):
+                import docx
+                import io
+                doc = docx.Document(io.BytesIO(uploaded_file.getvalue()))
+                text_content = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+
+                file_parts.append({
+                    "mime_type": "text/plain",
+                    "data": text_content.encode("utf-8")
+                })
+            else:
+                mime_type = uploaded_file.type
+                if not mime_type:
+                    # 기본값 설정
+                    if file_name.endswith(".pdf"):
+                        mime_type = "application/pdf"
+                    elif file_name.endswith((".jpg", ".jpeg")):
+                        mime_type = "image/jpeg"
+                    elif file_name.endswith(".png"):
+                        mime_type = "image/png"
+                    else:
+                        mime_type = "application/pdf"
+
+                file_parts.append({
+                    "mime_type": mime_type,
+                    "data": uploaded_file.getvalue()
+                })
+
         def call_gemini_with_fallback(inputs, generation_config):
             model_flash = genai.GenerativeModel('gemini-2.5-flash')
             model_lite = genai.GenerativeModel('gemini-3.5-flash-lite')
@@ -117,9 +128,15 @@ def extract_contract_info(uploaded_file) -> Optional[dict]:
           "렌트프리 없음"이거나 명시되어 있지 않으면 빈 리스트 []를 반환하세요. 절대 null이 아닌 빈 리스트여야 합니다.
         - remarks(비고)에는 임대료 납부 방식(예: 선납, 월납, 분기납 등), 인상률 합의, 연체 요율, 중도해지 위약금 등 계약상 주요 특약사항을 모두 요약해서 넣어주세요.
         """
-        
+
+        if len(file_parts) > 1:
+            prompt += (
+                "\n- 주의: 업로드된 파일은 하나의 계약서가 여러 장(페이지) 또는 여러 파일로 나뉘어 제공된 것입니다."
+                " 모든 파일의 내용을 하나의 문서처럼 종합하여 누락 없이 정보를 추출하세요.\n"
+            )
+
         response = call_gemini_with_fallback(
-            [file_data, prompt],
+            [*file_parts, prompt],
             generation_config=genai.GenerationConfig(
                 response_mime_type="application/json",
                 response_schema=ContractExtractionResult,

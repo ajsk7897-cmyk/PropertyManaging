@@ -229,13 +229,18 @@ elif update_mode == "🗑️ 계약 완전 삭제":
 elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계약 수정"]:
     st.markdown("---")
     st.markdown("#### 🤖 AI 계약서 자동 입력 (선택사항)")
-    uploaded_contract = st.file_uploader("계약서 스캔본(PDF/이미지) 혹은 원본 파일(Word)을 업로드하시면 AI가 계약 정보를 자동으로 추출합니다.", type=["pdf", "png", "jpg", "jpeg", "docx"])
-    if uploaded_contract:
+    uploaded_contracts = st.file_uploader(
+        "계약서 스캔본(PDF/이미지) 혹은 원본 파일(Word)을 업로드하시면 AI가 계약 정보를 자동으로 추출합니다. "
+        "하나의 계약서가 여러 장의 이미지/파일로 쪼개져 있다면 여러 파일을 함께 선택해주세요.",
+        type=["pdf", "png", "jpg", "jpeg", "docx"],
+        accept_multiple_files=True,
+    )
+    if uploaded_contracts:
          if st.button("✨ AI로 계약서 분석하기", type="primary"):
-            with st.spinner("AI가 계약서를 꼼꼼히 읽고 있습니다. (약 10~30초 소요)"):
+            with st.spinner(f"AI가 계약서 파일 {len(uploaded_contracts)}개를 꼼꼼히 읽고 있습니다. (약 10~30초 소요)"):
                 try:
                     from ai_utils import extract_contract_info
-                    extracted = extract_contract_info(uploaded_contract)
+                    extracted = extract_contract_info(uploaded_contracts)
                     if extracted:
                         st.session_state["ai_extracted"] = extracted
                         # multiselect 위젯은 default 파라미터를 키가 이미 존재하면 무시하므로,

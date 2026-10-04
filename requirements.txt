@@ -7,3 +7,4 @@ psycopg[binary]
 plotly
 google-genai
 google-generativeai
+python-docx

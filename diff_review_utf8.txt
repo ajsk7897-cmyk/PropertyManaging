@@ -1,0 +1,2468 @@
+diff --git a/chatbot_agent_v2.py b/chatbot_agent_v2.py
+index 27e7225..30930fc 100644
+--- a/chatbot_agent_v2.py
++++ b/chatbot_agent_v2.py
+@@ -1,683 +1,1056 @@
+-import psycopg2
++"""遺?숈궛 ?먯궛愿由?DB Q&A 梨쀫큸 ?먯씠?꾪듃 (Gemini function calling).
++
++援ъ꽦
++- ?꾧뎄(Tool) ?⑥닔: DB瑜?議고쉶/怨꾩궛??紐⑤뜽???쎌쓣 ?띿뒪?몃? 諛섑솚?⑸땲??
++- ?먯씠?꾪듃 猷⑦봽: 紐⑤뜽???붿껌???꾧뎄(蹂묐젹 ?몄텧 ?ы븿)瑜??ㅽ뻾?섍퀬 寃곌낵瑜??뚮젮二쇰ŉ,
++  理쒖쥌 ?듬?? ?ㅽ듃由щ컢?쇰줈 UI???꾨떖?⑸땲??
++
++?ㅺ퀎 ?먯튃
++- DB ?곌껐? utils??SQLAlchemy 而ㅻ꽖???(get_engine)???ъ궗?⑺빀?덈떎.
++- ?먯궛紐??낆껜紐낆? resolve_assets / resolve_companies ??怨녹뿉?쒕쭔 ?댁꽍?⑸땲??
++- 硫댁쟻 ?⑥쐞?????꾩껜? ?숈씪?섍쾶 '???낅땲??
++"""
++import inspect
++import json
++import re
++import time
++from datetime import date
++from typing import Optional
++
+ import pandas as pd
+-import google.generativeai as genai
+ import streamlit as st
+-import json
+-from datetime import datetime
+-
+-from utils import generate_annual_rent_roll
+-
+-def get_db_schema():
+-    return '''
+-CREATE TABLE asset_area (
+-    asset_name TEXT,
+-    floor TEXT,
+-    exclusive_area REAL,
+-    common_area REAL,
+-    total_area REAL, 
+-    bank_area REAL DEFAULT 0.0,
+-    PRIMARY KEY (asset_name, floor)
+-);
+-
+-CREATE TABLE lease_contracts (
+-    contract_id SERIAL PRIMARY KEY,
+-    asset_name TEXT,
+-    floor TEXT,
+-    company_name TEXT,
+-    contract_date DATE,
+-    start_date DATE,
+-    end_date DATE,
+-    contract_area REAL,
+-    deposit REAL,
+-    monthly_rent REAL,
+-    monthly_maintenance_fee REAL,
+-    total_rent_free_months INTEGER,
+-    rent_free_details TEXT,
+-    status TEXT DEFAULT 'ACTIVE',
+-    deposit_return_date DATE, 
+-    penalty_yn TEXT, 
+-    penalty_amount REAL, 
+-    parent_contract_id INTEGER, 
+-    currency TEXT DEFAULT 'KRW', 
+-    floor_details TEXT,
+-    escalation_cycle_years INTEGER, 
+-    rent_inc_rate REAL, 
+-    maint_inc_rate REAL, 
+-    contract_exclusive_area REAL,
+-    remarks TEXT, 
+-    rent_schedule TEXT
+-);
+-'''
+-
+-def get_db_connection():
+-    try:
+-        db_url = st.secrets.get("DATABASE_URL")
+-        if db_url:
+-            from urllib.parse import unquote
+-            db_url = unquote(db_url)
+-            return psycopg2.connect(db_url)
+-    except:
+-        pass
+-    
++from sqlalchemy import bindparam, text
++
++from utils import (
++    CURRENCY_RATES,
++    fetch_data,
++    generate_annual_rent_roll,
++    get_actual_monthly_rent_by_company,
++    get_current_leased_area_by_floor,
++    get_engine,
++)
++
++MODEL_NAME = "gemini-3.5-flash"
++MAX_TOOL_ROUNDS = 5        # 紐⑤뜽 ???꾧뎄 ?뺣났 理쒕? ?잛닔
++MAX_TOOL_CALLS = 10        # ??吏덈Ц???꾧뎄 ?ㅽ뻾 理쒕? ?잛닔(蹂묐젹 ?몄텧 ?ы븿)
++MAX_RESULT_CHARS = 12000   # ?꾧뎄 寃곌낵瑜?紐⑤뜽???섍만 ?뚯쓽 理쒕? 湲몄씠
++MAX_TABLE_ROWS = 80        # ???뺥깭 寃곌낵??理쒕? ????+HISTORY_MESSAGES = 6       # 紐⑤뜽???섍만 吏곸쟾 ???硫붿떆吏 ??+SQL_TIMEOUT = "8s"
++
++# ?ㅼ젣 DB ?먯궛紐??곷Ц) ???ъ슜?먭? 遺瑜????덈뒗 ?쒓?/?쎌묶 蹂꾩묶
++ASSET_ALIASES = {
++    "HQ Building": ["蹂몄젏", "蹂몄궗", "?먯씠移섑걧", "HQ鍮뚮뵫", "HQ", "蹂몄젏鍮뚮뵫"],
++    "ANSAN": ["?덉궛"],
++    "Bangbae-dong": ["諛⑸같??, "諛⑸같"],
++    "Boramae": ["蹂대씪留?],
++    "Bundang": ["遺꾨떦"],
++    "Busan": ["遺??],
++    "Busan Dormitory": ["遺?곌린?숈궗", "遺??湲곗닕??],
++    "Cheolsan Town": ["泥좎궛???, "泥좎궛"],
++    "Chimsan-dong": ["移⑥궛??, "移⑥궛"],
++    "Chuncheon": ["異섏쿇"],
++    "Daejeon": ["???],
++    "Deokcheon-dong": ["?뺤쿇??, "?뺤쿇"],
++    "Dunsan": ["?붿궛"],
++    "Family Town": ["?⑤?由ы???, "?쇰?由ы???],
++    "Gangneung": ["媛뺣쫱"],
++    "Gwangju": ["愿묒＜"],
++    "Hongseong": ["?띿꽦"],
++    "Iksan": ["?듭궛"],
++    "Jamsilseo": ["?좎떎??, "?좎떎"],
++    "Jungsan": ["以묒궛"],
++    "Macheon-dong": ["留덉쿇??, "留덉쿇"],
++    "Majang-dong": ["留덉옣??, "留덉옣"],
++    "Pohang": ["?ы빆"],
++    "Sanbon": ["?곕낯"],
++    "Sangju": ["?곸＜"],
++    "Seosuwon": ["?쒖닔??],
++    "Seoul Dormitory": ["?쒖슱湲곗닕??, "?쒖슱 湲곗닕??],
++    "Songpa": ["?≫뙆"],
++    "Wolgok-dong": ["?붽끝??, "?붽끝"],
++    "Wonju": ["?먯＜"],
++}
++
++DB_SCHEMA = """
++asset_area (?먯궛蹂?痢?硫댁쟻, ?⑥쐞: ??
++  asset_name TEXT, floor TEXT ('10F', 'B1F', 'RF' ??, exclusive_area REAL(?꾩슜), common_area REAL,
++  total_area REAL(?꾨?/怨꾩빟 湲곗? 硫댁쟻), bank_area REAL(????먯껜 ?ъ슜 硫댁쟻), PK(asset_name, floor)
++
++lease_contracts (?꾨?李?怨꾩빟)
++  contract_id SERIAL PK, asset_name TEXT, floor TEXT(?ㅼ링 怨꾩빟? '20,21' ?뺥깭), company_name TEXT,
++  contract_date DATE, start_date DATE, end_date DATE,
++  contract_area REAL(怨꾩빟硫댁쟻, ??, contract_exclusive_area REAL(?꾩슜硫댁쟻, ??,
++  deposit REAL(蹂댁쬆湲?, monthly_rent REAL(理쒖큹 ?붿엫?猷?, monthly_maintenance_fee REAL(理쒖큹 ?붽?由щ퉬),
++  currency TEXT('KRW' ?먮뒗 'USD'), total_rent_free_months INTEGER,
++  rent_free_details TEXT(?뚰듃?꾨━ ??紐⑸줉 JSON 諛곗뿴, ?? '["2026-10","2026-11"]'),
++  status TEXT('ACTIVE'=理쒖떊 怨꾩빟(媛깆떊 怨꾩빟? ?쒖옉?쇱씠 誘몃옒?????덉쓬), 'RENEWED'=媛깆떊 ??湲곗〈 怨꾩빟(湲곌컙???⑥븘 ?덉쑝硫??꾩옱???먯쑀 以?, 'TERMINATED'=以묐룄 ?댁?),
++  deposit_return_date DATE, penalty_yn TEXT, penalty_amount REAL, parent_contract_id INTEGER,
++  floor_details TEXT(痢듬퀎 硫댁쟻 JSON, ?? '{"20F": {"area": 687.3, "exclusive_area": 429.3, "ratio": 0.78}}'),
++  escalation_cycle_years INTEGER, rent_inc_rate REAL, maint_inc_rate REAL,
++  rent_schedule TEXT(?몄긽 諛섏쁺 湲곌컙蹂??꾨?猷?JSON), remarks TEXT
++
++rentroll_overrides (?뚰듃濡??섎룞 議곗젙媛?
++  contract_id INTEGER, floor TEXT, year INTEGER, month INTEGER, over_rent REAL, over_maint REAL
++
++contract_history (怨꾩빟 蹂寃??대젰)
++  history_id SERIAL PK, contract_id INTEGER, action_type TEXT, action_date DATE, action_month TEXT, details TEXT
++"""
++
++TOOL_LABELS = {
++    "execute_sql_query": "DB 吏곸젒 議고쉶",
++    "get_annual_rent_roll": "?곌컙 ?뚰듃濡?怨꾩궛",
++    "get_contract_details": "怨꾩빟 ?곸꽭 議고쉶",
++    "get_vacancy_status": "怨듭떎 ?꾪솴 怨꾩궛",
++    "get_expiring_contracts": "留뚭린 ?꾨옒 怨꾩빟 議고쉶",
++    "compare_revenue": "?섏씡 鍮꾧탳 怨꾩궛",
++    "get_deposit_return_schedule": "蹂댁쬆湲?諛섑솚 ?쇱젙 議고쉶",
++    "get_rent_per_pyung": "?됰떦 ?④? 怨꾩궛",
++    "get_current_rent_free_impact": "?뚰듃?꾨━ ?꾪솴 怨꾩궛",
++}
++
++
++# ---------------------------------------------------------------------------
++# 怨듯넻 ?ы띁
++# ---------------------------------------------------------------------------
++def _norm(s) -> str:
++    """鍮꾧탳???뺢퇋?? 怨듬갚, ?섏씠?? 愿꾪샇, 諛묒쨪 ?쒓굅 ???뚮Ц??"""
++    return re.sub(r"[\s\-_()]", "", str(s)).lower()
++
++
++def _all_asset_names() -> list:
++    # fetch_data 罹먯떆???곗씠???????鍮꾩썙吏誘濡??ш린??蹂꾨룄 罹먯떆瑜??먯? ?딆뒿?덈떎.
++    df = fetch_data(
++        "SELECT DISTINCT asset_name FROM asset_area "
++        "UNION SELECT DISTINCT asset_name FROM lease_contracts"
++    )
++    return sorted(n for n in df["asset_name"].dropna().unique() if str(n).strip())
++
++
++def _all_company_names() -> list:
++    df = fetch_data("SELECT DISTINCT company_name FROM lease_contracts")
++    return sorted(n for n in df["company_name"].dropna().unique() if str(n).strip())
++
++
++def resolve_assets(name: str):
++    """?ъ슜???낅젰 ?먯궛紐낆쓣 ?ㅼ젣 DB ?먯궛紐?由ъ뒪?몃줈 蹂?섑빀?덈떎.
++
++    諛섑솚媛? None(?낅젰 ?놁쓬 = ?꾩껜), [] (李얠? 紐삵븿), [?먯궛紐? ...]
++    """
++    if name is None or not str(name).strip() or _norm(name) in ("?꾩껜", "all", "紐⑤뱺?먯궛"):
++        return None
++    names = _all_asset_names()
++    key = _norm(name)
++
++    # 1) DB ?먯궛紐낃낵 ?뺥솗???쇱튂
++    for n in names:
++        if _norm(n) == key:
++            return [n]
++
++    # 2) 蹂꾩묶 留ㅼ묶: ?낅젰???ы븿??蹂꾩묶 以?媛??湲?寃껋쓣 ?좏깮 ('遺?곌린?숈궗'媛 '遺??蹂대떎 ?곗꽑)
++    best = None
++    for real, aliases in ASSET_ALIASES.items():
++        for alias in aliases + [real]:
++            a = _norm(alias)
++            if a and a in key and (best is None or len(a) > best[0]):
++                best = (len(a), real)
++    if best and best[1] in names:
++        return [best[1]]
++
++    # 3) DB ?먯궛紐?遺遺??쇱튂
++    return [n for n in names if key in _norm(n)]
++
++
++def resolve_companies(name: str) -> list:
++    """?낆껜紐?遺遺??쇱튂 寃??(怨듬갚/愿꾪샇/?섏씠??臾댁떆)."""
++    key = _norm(name)
++    if not key:
++        return []
++    return [c for c in _all_company_names() if key in _norm(c)]
++
++
++def _asset_not_found(name: str) -> str:
++    return (
++        f"'{name}'???대떦?섎뒗 ?먯궛??李얠? 紐삵뻽?듬땲?? "
++        f"?ъ슜 媛?ν븳 ?먯궛紐? {', '.join(_all_asset_names())}. ?щ컮瑜??먯궛紐낆쑝濡??ㅼ떆 ?몄텧?섏꽭??"
++    )
++
++
++def _company_not_found(name: str) -> str:
++    return (
++        f"'{name}'??媛) ?ы븿???낆껜紐낆쓣 李얠? 紐삵뻽?듬땲?? "
++        "?낆껜紐낆쓽 ?듭떖 ?⑥뼱留뚯쑝濡??ㅼ떆 寃?됲븯嫄곕굹, execute_sql_query濡?company_name??ILIKE 寃?됲빐 蹂댁꽭??"
++    )
++
++
++def _read_sql(sql: str, params: Optional[dict] = None, expanding: tuple = ()) -> pd.DataFrame:
++    """?뚮씪誘명꽣 諛붿씤??議고쉶. expanding??吏?뺥븳 ?뚮씪誘명꽣??由ъ뒪?몃? IN ?덈줈 ?뺤옣?⑸땲??"""
++    stmt = text(sql)
++    if expanding:
++        stmt = stmt.bindparams(*[bindparam(p, expanding=True) for p in expanding])
++    with get_engine().connect() as conn:
++        return pd.read_sql(stmt, conn, params=params or {})
++
++
++def _df_to_text(df: pd.DataFrame, max_rows: int = MAX_TABLE_ROWS) -> str:
++    if df is None or df.empty:
++        return "議고쉶???곗씠?곌? ?놁뒿?덈떎."
++    n = len(df)
++    out = df.head(max_rows).to_markdown(index=False, floatfmt=",.2f")
++    if n > max_rows:
++        out += f"\n\n(珥?{n}??以??곸쐞 {max_rows}?됰쭔 ?쒖떆. ?꾩껜 ?⑷퀎??吏묎퀎 荑쇰━??怨꾩궛 ?꾧뎄瑜??ъ슜?섏꽭??)"
++    else:
++        out += f"\n\n(珥?{n}??"
++    return out
++
++
++def _fx(currency) -> float:
++    return CURRENCY_RATES["USD_TO_KRW"] if str(currency).upper() == "USD" else 1.0
++
++
++def _to_krw(val, currency) -> float:
++    if val is None or pd.isna(val):
++        return 0.0
++    return float(val) * _fx(currency)
++
++
++def _won(v: float) -> str:
++    """湲덉븸??'12,345,678??(??1,234.6留뚯썝)' ?뺥깭濡??쒖떆."""
++    v = float(v or 0)
++    if abs(v) >= 1e8:
++        return f"{v:,.0f}??(??{v / 1e8:,.2f}?듭썝)"
++    if abs(v) >= 1e4:
++        return f"{v:,.0f}??(??{v / 1e4:,.0f}留뚯썝)"
++    return f"{v:,.0f}??
++
++
++def _parse_json(val):
++    if val is None or (isinstance(val, float) and pd.isna(val)) or val == "":
++        return None
++    if isinstance(val, (list, dict)):
++        return val
+     try:
+-        conn_info = st.secrets["connections"]["postgresql"]
+-        return psycopg2.connect(
+-            host=conn_info["host"],
+-            port=conn_info["port"],
+-            database=conn_info["database"],
+-            user=conn_info["username"],
+-            password=conn_info["password"]
+-        )
+-    except:
+-        pass
+-    
+-    import os
+-    secrets_path = os.path.join(os.getcwd(), ".streamlit", "secrets.toml")
+-    if os.path.exists(secrets_path):
+-        with open(secrets_path, "r", encoding="utf-8") as f:
+-            content = f.read()
+-            for line in content.split("\n"):
+-                if line.startswith("DATABASE_URL"):
+-                    from urllib.parse import unquote
+-                    url = line.split("=", 1)[1].strip().strip('"').strip("'")
+-                    url = unquote(url)
+-                    return psycopg2.connect(url)
+-    
+-    raise Exception("?곗씠?곕쿋?댁뒪 ?곌껐 ?뺣낫瑜?李얠쓣 ???놁뒿?덈떎.")
++        return json.loads(val)
++    except (TypeError, ValueError):
++        return None
++
++
++def _data_version(year: int) -> str:
++    """怨꾩빟/?섎룞議곗젙 ?곗씠?곗쓽 吏臾? ?깆뿉???곗씠?곕? ??ν븯硫?fetch_data 罹먯떆媛 鍮꾩썙??媛믪씠 諛붾앸땲??"""
++    df_c = fetch_data("SELECT * FROM Lease_Contracts")
++    df_o = fetch_data(f"SELECT * FROM RentRoll_Overrides WHERE year = {int(year)}")
++    h = int(pd.util.hash_pandas_object(df_c.astype(str), index=False).sum()) if not df_c.empty else 0
++    h2 = int(pd.util.hash_pandas_object(df_o.astype(str), index=False).sum()) if not df_o.empty else 0
++    return f"{len(df_c)}:{h}:{len(df_o)}:{h2}"
++
++
++def _cached_rent_roll(year: int, assets: Optional[tuple], companies: Optional[tuple]) -> pd.DataFrame:
++    """?뚰듃濡ㅼ? (?곕룄, ?먯궛, ?낆껜, ?곗씠??吏臾? 議고빀蹂꾨줈 罹먯떆?⑸땲?? ?곗씠?곌? 諛붾뚮㈃ 吏臾몄씠 ?щ씪???ㅼ떆 怨꾩궛?⑸땲??"""
++    return _rent_roll_by_version(int(year), assets, companies, _data_version(year))
++
++
++@st.cache_data(ttl=3600, show_spinner=False, max_entries=200)
++def _rent_roll_by_version(year: int, assets: Optional[tuple], companies: Optional[tuple], version_key: str) -> pd.DataFrame:
++    """??긽 1~12???꾩껜瑜?怨꾩궛?⑸땲??"""
++    df, _ = generate_annual_rent_roll(
++        year,
++        sel_assets=list(assets) if assets else None,
++        sel_companies=list(companies) if companies else None,
++        start_month=1,
++    )
++    return df
++
++
++def _sum_months(df: pd.DataFrame, months) -> tuple:
++    """?뚰듃濡ㅼ뿉??吏?뺥븳 ?붾뱾??(?꾨?猷? 愿由щ퉬) ?⑷퀎瑜??먰솕濡?諛섑솚."""
++    if df is None or df.empty:
++        return 0.0, 0.0
++    fx = df["?듯솕"].map(_fx) if "?듯솕" in df.columns else 1.0
++    rent = maint = 0.0
++    for m in months:
++        if f"{m}???꾨?猷? in df.columns:
++            rent += float((df[f"{m}???꾨?猷?] * fx).sum())
++        if f"{m}??愿由щ퉬" in df.columns:
++            maint += float((df[f"{m}??愿由щ퉬"] * fx).sum())
++    return rent, maint
+ 
+-import time
+-_global_tool_state = {"count": 0, "last_time": 0}
+-
+-def _check_global_tool_limit():
+-    global _global_tool_state
+-    now = time.time()
+-    if now - _global_tool_state["last_time"] > 15:
+-        _global_tool_state["count"] = 0
+-    _global_tool_state["count"] += 1
+-    _global_tool_state["last_time"] = now
+-    
+-    if _global_tool_state["count"] > 5:
+-        return "?슚 [移섎챸???ㅻ쪟] ?꾧뎄 ?몄텧 ?쒕룄(5??瑜?珥덇낵?덉뒿?덈떎. ???댁긽 ?대뼚???꾧뎄???몄텧?섏? 留먭퀬, ?ъ슜?먯뿉寃?'?붿껌???덈Т 蹂듭옟?섏뿬 吏곸젒 ?듬??????놁뒿?덈떎.'?쇨퀬 ?듬??섍퀬 利됱떆 醫낅즺?섏꽭??"
+-    return None
+ 
++# ---------------------------------------------------------------------------
++# ?꾧뎄 ?⑥닔 (docstring??紐⑤뜽?먭쾶 ?꾨떖?섎뒗 ?꾧뎄 ?ㅻ챸?낅땲??
++# ---------------------------------------------------------------------------
+ def execute_sql_query(sql_query: str) -> str:
+-    '''
+-    ?곗씠?곕쿋?댁뒪???먯떆 SQL(SELECT)???ㅽ뻾?섏뿬 寃곌낵瑜?留덊겕?ㅼ슫 ??臾몄옄?대줈 諛섑솚?⑸땲??
+-    ?⑥닚??怨꾩빟 ?댁뿭, ?먯궛 硫댁쟻, 蹂댁쬆湲??깆쓣 議고쉶?????ъ슜?섏꽭??
+-    ?곌컙 ?꾨?猷??섏엯?대굹 ?뚰듃濡ㅼ쓣 怨꾩궛???뚮뒗 ???꾧뎄 ???get_annual_rent_roll???ъ슜?섏꽭??
+-    '''
+-    limit_msg = _check_global_tool_limit()
+-    if limit_msg: return limit_msg
+-
+-    if not sql_query.strip().upper().startswith("SELECT"):
+-        return "?ㅻ쪟: SELECT 荑쇰━留??ㅽ뻾?????덉뒿?덈떎."
+-    
+-    import re
+-    sql_query = re.sub(r'"([^"]+)"', lambda m: m.group(1).lower(), sql_query)
+-    sql_query = sql_query.replace('Lease_Contracts', "lease_contracts")
+-    sql_query = sql_query.replace('Asset_Area', "asset_area")
+-    sql_query = sql_query.replace('RentRoll_Overrides', "rentroll_overrides")
+-    sql_query = sql_query.replace('Contract_History', "contract_history")
+-    
+-    asset_name_aliases = {
+-        r'蹂몄젏|蹂몄궗|?먯씠移섑걧|hq鍮뚮뵫|hq building|hq': 'HQ',
+-        r'遺??: 'Busan', r'?붿궛': 'Dunsan', r'愿묒＜': 'Gwangju',
+-        r'?좎떎': 'Jamsilseo', r'?≫뙆': 'Songpa', r'泥좎궛': 'Cheolsan Town',
+-        r'異섏쿇': 'Chuncheon', r'遺꾨떦': 'Bundang', r'?ы빆': 'Pohang',
+-        r'???: 'Daejeon', r'移⑥궛': 'Chimsan-dong',
+-    }
+-    for pattern, real_key in asset_name_aliases.items():
+-        sql_query = re.sub(rf"'%([^']*)({pattern})([^']*)%'", f"'%{real_key}%'", sql_query, flags=re.IGNORECASE)
+-        sql_query = re.sub(rf"'({pattern})'", f"'%{real_key}%'", sql_query, flags=re.IGNORECASE)
++    """?꾩슜 ?꾧뎄濡??닿껐?섏? ?딅뒗 議고쉶瑜??꾪빐 PostgreSQL SELECT 荑쇰━瑜??쎄린 ?꾩슜?쇰줈 ?ㅽ뻾?⑸땲??
+ 
++    ?꾩감??紐⑸줉, 議곌굔 寃?? ?⑥닚 吏묎퀎 ?깆뿉 ?ъ슜?섏꽭?? ?ㅼ젣 ?붾퀎 ?꾨?猷??섏엯(?몄긽, ?뚰듃?꾨━,
++    ?섎룞議곗젙 諛섏쁺)? ???꾧뎄 ???get_annual_rent_roll ?먮뒗 compare_revenue瑜??ъ슜?섏꽭??
++    ?먯궛紐낆? 諛섎뱶???곷Ц DB ?먯궛紐??? 'HQ Building')???ъ슜?섏꽭??
++
++    Args:
++        sql_query: ?ㅽ뻾???⑥씪 SELECT(?먮뒗 WITH) 荑쇰━. ?몃?肄쒕줎?쇰줈 ?щ윭 臾몄옣???댁뼱 ?곗? 留덉꽭??
++    """
++    sql = (sql_query or "").strip().rstrip(";").strip()
++    if not re.match(r"(?is)^(select|with)\b", sql):
++        return "?ㅻ쪟: 議고쉶(SELECT/WITH) 荑쇰━留??ㅽ뻾?????덉뒿?덈떎."
++    if ";" in sql:
++        return "?ㅻ쪟: ??踰덉뿉 ?섎굹??荑쇰━留??ㅽ뻾?????덉뒿?덈떎. ?몃?肄쒕줎???쒓굅?섍퀬 ?ㅼ떆 ?쒕룄?섏꽭??"
++    # 紐⑤뜽??"Lease_Contracts"泥섎읆 ?곗샂???앸퀎?먮? ?곕㈃ PostgreSQL?먯꽌 ??뚮Ц?먭? 援щ텇?섎?濡??뚮Ц?먰솕
++    sql = re.sub(r'"([A-Za-z_][A-Za-z0-9_]*)"', lambda m: m.group(1).lower(), sql)
+     try:
+-        conn = get_db_connection()
+-        df = pd.read_sql_query(sql_query, conn)
+-        conn.close()
+-        return df.to_markdown() if not df.empty else "議고쉶???곗씠?곌? ?놁뒿?덈떎."
++        # DBAPI 而ㅼ꽌瑜?吏곸젒 ?ъ슜?⑸땲?? ?뚮씪誘명꽣 ?놁씠 ?ㅽ뻾?댁빞 LIKE '%..%'??'%'媛 ?щ㎎ 臾몄옄濡??댁꽍?섏? ?딆뒿?덈떎.
++        raw = get_engine().raw_connection()
++        try:
++            cur = raw.cursor()
++            # ?쎄린 ?꾩슜 ?몃옖??뀡 + ??꾩븘?? LLM??留뚮뱺 荑쇰━媛 ?곗씠?곕? 諛붽씀嫄곕굹 ?ㅻ옒 嫄몃━吏 ?딅룄濡?李⑤떒
++            cur.execute("SET TRANSACTION READ ONLY")
++            cur.execute(f"SET LOCAL statement_timeout = '{SQL_TIMEOUT}'")
++            cur.execute(sql)
++            cols = [d[0] for d in cur.description] if cur.description else []
++            rows = cur.fetchmany(2000)
++            cur.close()
++        finally:
++            raw.rollback()
++            raw.close()  # ???諛섑솚
++        return _df_to_text(pd.DataFrame(rows, columns=cols))
+     except Exception as e:
+-        return f"荑쇰━ ?ㅽ뻾 ?ㅻ쪟 諛쒖깮 (臾몃쾿???섏젙?섏뿬 ?ъ떆??媛??: {e}."
++        msg = str(e).split("\n[SQL")[0][:600]
++        return (
++            f"荑쇰━ ?ㅽ뻾 ?ㅻ쪟: {msg}\n"
++            "?ㅽ궎留덉쓽 ?뚯씠釉?而щ읆紐낃낵 臾몃쾿???뺤씤??荑쇰━瑜??섏젙?????ㅼ떆 ?쒕룄?섏꽭??"
++        )
++
+ 
+ def get_annual_rent_roll(year: int, asset_name: str = "") -> str:
+-    '''
+-    ?뚰듃?꾨━, 以묐룄 ?낇눜?? ?섎룞 ?덉쇅議곗젙, ?꾨?猷??뺢린 ?몄긽 ?깆쓣 紐⑤몢 ?꾨꼍??諛섏쁺?섏뿬 怨꾩궛??-    ?뱀젙 ?곕룄???뚰듃濡??붾퀎 ?꾨?猷?諛?愿由щ퉬 ?섏엯 珥앺빀) ?곗씠?곕? 議고쉶?⑸땲??
+-    ?ъ슜?먭? '?곌컙 ?꾨?猷??섏엯', '?곌컙 愿由щ퉬 ?섏엯', '?뱀젙 ?곕룄???섏엯' ?깆쓣 臾쇱뼱蹂???諛섎뱶?????꾧뎄瑜??ъ슜?섏꽭??
+-    asset_name? ?곷Ц?먯궛紐?HQ, Busan ?? ?뱀? 鍮?臾몄옄?댁쓣 ?낅젰?섏꽭??
+-    '''
+-    limit_msg = _check_global_tool_limit()
+-    if limit_msg: return limit_msg
++    """?뱀젙 ?곕룄???붾퀎 ?꾨?猷?愿由щ퉬 ?섏엯(?뚰듃濡???怨꾩궛?⑸땲??
+ 
++    ?뚰듃?꾨━, 以묐룄 ?낇눜???쇳븷 怨꾩궛, ?꾨?猷??몄긽 ?ㅼ?以? ?섎룞 議곗젙媛믪씠 紐⑤몢 諛섏쁺???ㅼ젣 泥?뎄 湲곗??낅땲??
++    '?ы빐 ?꾨?猷??섏엯', '?곌컙 愿由щ퉬', '?붾퀎 ?섏엯' 媛숈? 吏덈Ц???ъ슜?섏꽭??
++
++    Args:
++        year: 議고쉶 ?곕룄 (?? 2026)
++        asset_name: ?먯궛紐??쒓? 蹂꾩묶 媛?? ?? '蹂몄젏'). 鍮꾩슦硫??꾩껜 ?먯궛.
++    """
+     try:
+-        sel_assets = None
+-        if asset_name and asset_name.strip() != "":
+-            import re
+-            asset_name_aliases = {
+-                r'蹂몄젏|蹂몄궗|?먯씠移섑걧|hq鍮뚮뵫|hq building|hq': 'HQ',
+-                r'遺??: 'Busan', r'?붿궛': 'Dunsan', r'愿묒＜': 'Gwangju',
+-                r'?좎떎': 'Jamsilseo', r'?≫뙆': 'Songpa', r'泥좎궛': 'Cheolsan Town',
+-                r'異섏쿇': 'Chuncheon', r'遺꾨떦': 'Bundang', r'?ы빆': 'Pohang',
+-                r'???: 'Daejeon', r'移⑥궛': 'Chimsan-dong',
+-            }
+-            mapped_asset = asset_name
+-            for pattern, real_key in asset_name_aliases.items():
+-                if re.search(pattern, asset_name, re.IGNORECASE):
+-                    mapped_asset = real_key
+-                    break
+-            sel_assets = [mapped_asset]
+-            
+-        df_rr, _ = generate_annual_rent_roll(year, sel_assets=sel_assets)
+-        if df_rr.empty:
++        assets = resolve_assets(asset_name)
++        if assets == []:
++            return _asset_not_found(asset_name)
++        df = _cached_rent_roll(int(year), tuple(assets) if assets else None, None)
++        if df.empty:
+             return f"{year}?꾩뿉 ?대떦?섎뒗 ?뚰듃濡??곗씠?곌? ?놁뒿?덈떎."
+-            
+-        start_m = 6 if year == 2026 else 1
+-        
+-        total_rent = 0
+-        total_maint = 0
+-        summary_str = f"[{year}???뚰듃濡??섏엯 ?붿빟 (?먯궛: {asset_name or '?꾩껜'})]\n"
+-        for m in range(start_m, 13):
+-            r_col = f"{m}???꾨?猷?
+-            m_col = f"{m}??愿由щ퉬"
+-            m_rent = df_rr[r_col].sum() if r_col in df_rr.columns else 0
+-            m_maint = df_rr[m_col].sum() if m_col in df_rr.columns else 0
+-            total_rent += m_rent
+-            total_maint += m_maint
+-            summary_str += f"- {m}?? ?꾨?猷?{m_rent:,.0f}?? 愿由щ퉬 {m_maint:,.0f}??n"
+-            
+-        summary_str += f"\n=> 珥??곌컙 ?꾨?猷??섏엯: {total_rent:,.0f}??n"
+-        summary_str += f"=> 珥??곌컙 愿由щ퉬 ?섏엯: {total_maint:,.0f}??n"
+-        
+-        return summary_str
++
++        label = ", ".join(assets) if assets else "?꾩껜 ?먯궛"
++        lines = [f"[{year}???뚰듃濡?(?먯궛: {label}, ?먰솕 ?섏궛, 1~12??]"]
++        total_rent = total_maint = 0.0
++        for m in range(1, 13):
++            r, mt = _sum_months(df, [m])
++            total_rent += r
++            total_maint += mt
++            lines.append(f"- {m}?? ?꾨?猷?{r:,.0f}??/ 愿由щ퉬 {mt:,.0f}??)
++        lines.append(f"\n=> ?곌컙 ?꾨?猷??⑷퀎: {_won(total_rent)}")
++        lines.append(f"=> ?곌컙 愿由щ퉬 ?⑷퀎: {_won(total_maint)}")
++        lines.append(f"=> ?곌컙 珥앹닔?? {_won(total_rent + total_maint)}")
++
++        if not assets and "?먯궛紐? in df.columns:
++            fx = df["?듯솕"].map(_fx) if "?듯솕" in df.columns else 1.0
++            rent_cols = [f"{m}???꾨?猷? for m in range(1, 13) if f"{m}???꾨?猷? in df.columns]
++            maint_cols = [f"{m}??愿由щ퉬" for m in range(1, 13) if f"{m}??愿由щ퉬" in df.columns]
++            by_asset = pd.DataFrame({
++                "?먯궛紐?: df["?먯궛紐?],
++                "?곌컙?꾨?猷?: df[rent_cols].sum(axis=1) * fx,
++                "?곌컙愿由щ퉬": df[maint_cols].sum(axis=1) * fx,
++            }).groupby("?먯궛紐?, as_index=False).sum()
++            by_asset["?곌컙珥앹닔??] = by_asset["?곌컙?꾨?猷?] + by_asset["?곌컙愿由щ퉬"]
++            by_asset = by_asset.sort_values("?곌컙珥앹닔??, ascending=False)
++            lines.append("\n[?먯궛蹂??곌컙 ?섏엯]\n" + _df_to_text(by_asset.round(0)))
++        return "\n".join(lines)
+     except Exception as e:
+-        return f"?ㅻ쪟 諛쒖깮! ?덈? ?ъ떆?꾪븯吏 留먭퀬 ?ъ슜?먯뿉寃??ш낵?섏꽭?? ?곸꽭: {e}"
++        return f"?뚰듃濡?怨꾩궛 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎: {e}"
++
+ 
+-def get_contract_details(company_name: str) -> str:
+-    '''
+-    ?뱀젙 ?꾩감???뚯궗紐???怨꾩빟 ?곸꽭 ?뺣낫(蹂댁쬆湲? ?꾨?猷? 怨꾩빟?쇱옄 ??瑜?議고쉶?⑸땲??
+-    '''
+-    limit_msg = _check_global_tool_limit()
+-    if limit_msg: return limit_msg
++def get_contract_details(company_name: str, include_inactive: bool = False) -> str:
++    """?뱀젙 ?꾩감???낆껜紐??쇰?留??낅젰?대룄 ????怨꾩빟 ?곸꽭(痢? 硫댁쟻, 湲곌컙, 蹂댁쬆湲? ?꾨?猷? ?뚰듃?꾨━ ??瑜?議고쉶?⑸땲??
+ 
++    Args:
++        company_name: ?낆껜紐??먮뒗 ?낆껜紐낆쓽 ?쇰? (?? '?섎굹?뚮윭??)
++        include_inactive: True硫?媛깆떊 ???댁???怨쇨굅 怨꾩빟???ы븿
++    """
+     try:
+-        conn = get_db_connection()
+-        query = """
+-            SELECT asset_name, floor, company_name, start_date, end_date, 
+-                   deposit, monthly_rent, monthly_maintenance_fee, rent_free_details, status
++        names = resolve_companies(company_name)
++        if not names:
++            return _company_not_found(company_name)
++        sql = """
++            SELECT asset_name, floor, company_name, status, start_date, end_date,
++                   contract_area AS 怨꾩빟硫댁쟻_?? contract_exclusive_area AS ?꾩슜硫댁쟻_??
++                   deposit, monthly_rent, monthly_maintenance_fee, currency,
++                   rent_free_details, escalation_cycle_years, rent_inc_rate, remarks
+             FROM lease_contracts
+-            WHERE company_name ILIKE %s AND status = 'ACTIVE'
++            WHERE company_name IN :names
+         """
+-        df = pd.read_sql_query(query, conn, params=('%' + company_name + '%',))
+-        conn.close()
++        if not include_inactive:
++            sql += " AND status = 'ACTIVE'"
++        sql += " ORDER BY company_name, asset_name, start_date"
++        df = _read_sql(sql, {"names": names}, expanding=("names",))
+         if df.empty:
+-            return f"'{company_name}'??????쒖꽦 怨꾩빟 ?뺣낫瑜?李얠쓣 ???놁뒿?덈떎."
+-        return df.to_markdown()
++            return f"'{company_name}'???쒖꽦 怨꾩빟???놁뒿?덈떎. (留ㅼ묶 ?낆껜: {', '.join(names)}) include_inactive=True濡?怨쇨굅 怨꾩빟???뺤씤?????덉뒿?덈떎."
++        header = f"[留ㅼ묶???낆껜: {', '.join(names[:10])}{' ?? if len(names) > 10 else ''}]\n"
++        return header + _df_to_text(df)
+     except Exception as e:
+-        return f"?ㅻ쪟 諛쒖깮! ?덈? ?ъ떆?꾪븯吏 留먭퀬 ?ъ슜?먯뿉寃??ш낵?섏꽭?? ?곸꽭: {e}"
++        return f"怨꾩빟 議고쉶 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎: {e}"
++
+ 
+ def get_vacancy_status(asset_name: str = "") -> str:
+-    '''
+-    ?뱀젙 ?먯궛 ?먮뒗 ?꾩껜 ?먯궛??怨듭떎瑜?%)怨??꾩옱 鍮꾩뼱?덈뒗 痢?floor)??議고쉶?⑸땲??
+-    '''
+-    limit_msg = _check_global_tool_limit()
+-    if limit_msg: return limit_msg
++    """?ㅻ뒛 湲곗? ?먯궛蹂?怨듭떎 硫댁쟻, 怨듭떎瑜?%)怨?怨듭떎???덈뒗 痢듭쓣 怨꾩궛?⑸땲??
++
++    ?깆쓽 '?먯궛蹂??듯빀 議고쉶' ?붾㈃怨?媛숈? 湲곗??낅땲??
++    ?꾨?媛?λ㈃??= ?꾩슜硫댁쟻 - ????ъ슜硫댁쟻, 怨듭떎 = ?꾨?媛?λ㈃??- ?좏슚 怨꾩빟 ?꾩슜硫댁쟻. ?⑥쐞????
+ 
++    Args:
++        asset_name: ?먯궛紐??쒓? 蹂꾩묶 媛??. 鍮꾩슦硫??꾩껜 ?먯궛???먯궛蹂꾨줈 ?붿빟.
++    """
+     try:
+-        conn = get_db_connection()
+-        
+-        area_query = "SELECT asset_name, floor, total_area FROM asset_area"
+-        mapped_asset = asset_name
+-        if asset_name and asset_name.strip() != "":
+-            import re
+-            asset_name_aliases = {
+-                r'蹂몄젏|蹂몄궗|?먯씠移섑걧|hq鍮뚮뵫|hq building|hq': 'HQ',
+-                r'遺??: 'Busan', r'?붿궛': 'Dunsan', r'愿묒＜': 'Gwangju',
+-                r'?좎떎': 'Jamsilseo', r'?≫뙆': 'Songpa', r'泥좎궛': 'Cheolsan Town',
+-                r'異섏쿇': 'Chuncheon', r'遺꾨떦': 'Bundang', r'?ы빆': 'Pohang',
+-                r'???: 'Daejeon', r'移⑥궛': 'Chimsan-dong',
+-            }
+-            for pattern, real_key in asset_name_aliases.items():
+-                if re.search(pattern, asset_name, re.IGNORECASE):
+-                    mapped_asset = real_key
+-                    break
+-            area_query += f" WHERE asset_name ILIKE '%%{mapped_asset}%%'"
+-            
+-        df_area = pd.read_sql_query(area_query, conn)
+-        
+-        lease_query = "SELECT asset_name, floor, contract_area FROM lease_contracts WHERE status = 'ACTIVE'"
+-        if asset_name and asset_name.strip() != "":
+-            lease_query += f" AND asset_name ILIKE '%%{mapped_asset}%%'"
+-        df_lease = pd.read_sql_query(lease_query, conn)
+-        conn.close()
+-        
++        assets = resolve_assets(asset_name)
++        if assets == []:
++            return _asset_not_found(asset_name)
++
++        df_area = fetch_data("SELECT asset_name, floor, exclusive_area, total_area, bank_area FROM asset_area")
++        # '?먯궛蹂??듯빀 議고쉶' ?붾㈃怨?媛숈? ?⑥닔濡??먯쑀 硫댁쟻??怨꾩궛?⑸땲??媛깆떊 ??怨꾩빟 ?ы븿, ?ㅼ링 怨꾩빟 痢듬퀎 諛곕텇).
++        leased = get_current_leased_area_by_floor().rename(columns={"leased_area": "leased"})
++        if assets:
++            df_area = df_area[df_area["asset_name"].isin(assets)]
++            leased = leased[leased["asset_name"].isin(assets)]
+         if df_area.empty:
+-            return "?대떦 ?먯궛??硫댁쟻 ?뺣낫媛 議댁옱?섏? ?딆뒿?덈떎."
+-            
+-        total_area = df_area['total_area'].sum()
+-        leased_area = df_lease['contract_area'].sum() if not df_lease.empty else 0
+-        vacancy_area = total_area - leased_area
+-        vacancy_rate = (vacancy_area / total_area * 100) if total_area > 0 else 0
+-        
+-        df_area['key'] = df_area['asset_name'] + "_" + df_area['floor']
+-        df_lease['key'] = df_lease['asset_name'] + "_" + df_lease['floor']
+-        leased_keys = set(df_lease['key'].unique())
+-        empty_floors_df = df_area[~df_area['key'].isin(leased_keys)]
+-        
+-        res = f"[{asset_name or '?꾩껜'} ?먯궛 怨듭떎 ?꾪솴]\n"
+-        res += f"- 珥??꾨?媛?λ㈃?? {total_area:,.2f} ??n"
+-        res += f"- ?꾩옱 ?꾨?硫댁쟻: {leased_area:,.2f} ??n"
+-        res += f"- 怨듭떎瑜? {vacancy_rate:.1f}%\n"
+-        
+-        if not empty_floors_df.empty:
+-            empty_list = empty_floors_df.apply(lambda row: f"{row['asset_name']} {row['floor']}", axis=1).tolist()
+-            res += f"- ?꾩옱 ?꾩쟾 怨듭떎 痢? {', '.join(empty_list)}\n"
++            return "?대떦 ?먯궛??硫댁쟻 ?뺣낫媛 ?놁뒿?덈떎."
++
++        df = df_area.merge(leased, on=["asset_name", "floor"], how="left")
++        df["leased"] = df["leased"].fillna(0.0)
++        df["rentable"] = (df["exclusive_area"].fillna(0) - df["bank_area"].fillna(0)).clip(lower=0)
++        df["vacant"] = (df["rentable"] - df["leased"]).clip(lower=0)
++        df = df[df["rentable"] > 0]
++
++        total_rentable = df["rentable"].sum()
++        total_vacant = df["vacant"].sum()
++        rate = total_vacant / total_rentable * 100 if total_rentable else 0
++
++        label = ", ".join(assets) if assets else "?꾩껜 ?먯궛"
++        res = [
++            f"[{label} 怨듭떎 ?꾪솴 (?ㅻ뒛 {date.today():%Y-%m-%d} 湲곗?, ?꾩슜硫댁쟻 湲곗?, ?⑥쐞: ??]",
++            f"- ?꾨?媛?λ㈃?? {total_rentable:,.2f}??,
++            f"- ?꾨?硫댁쟻: {total_rentable - total_vacant:,.2f}??,
++            f"- 怨듭떎硫댁쟻: {total_vacant:,.2f}??,
++            f"- 怨듭떎瑜? {rate:.1f}%",
++        ]
++
++        if not assets:
++            by_asset = df.groupby("asset_name", as_index=False)[["rentable", "vacant"]].sum()
++            by_asset["怨듭떎瑜?%)"] = (by_asset["vacant"] / by_asset["rentable"] * 100).round(1)
++            by_asset = by_asset.rename(columns={"asset_name": "?먯궛", "rentable": "?꾨?媛????", "vacant": "怨듭떎(??"})
++            res.append("\n[?먯궛蹂?怨듭떎]\n" + _df_to_text(by_asset.sort_values("怨듭떎瑜?%)", ascending=False)))
+         else:
+-            res += "- ?꾩옱 ?꾩쟾 怨듭떎??痢듭? ?놁뒿?덈떎.\n"
+-            
+-        return res
++            vac = df[df["vacant"] > 0.5].copy()
++            if vac.empty:
++                res.append("- 怨듭떎???덈뒗 痢듭씠 ?놁뒿?덈떎.")
++            else:
++                vac["?곹깭"] = vac.apply(lambda r: "?꾩쟾 怨듭떎" if r["leased"] <= 0.01 else "遺遺?怨듭떎", axis=1)
++                vac = vac.rename(columns={"asset_name": "?먯궛", "floor": "痢?, "rentable": "?꾨?媛????",
++                                          "leased": "?꾨?(??", "vacant": "怨듭떎(??"})
++                res.append("\n[怨듭떎???덈뒗 痢?\n" + _df_to_text(
++                    vac[["?먯궛", "痢?, "?꾨?媛????", "?꾨?(??", "怨듭떎(??", "?곹깭"]]
++                ))
++        return "\n".join(res)
+     except Exception as e:
+-        return f"?ㅻ쪟 諛쒖깮! ?덈? ?ъ떆?꾪븯吏 留먭퀬 ?ъ슜?먯뿉寃??ш낵?섏꽭?? ?곸꽭: {e}"
++        return f"怨듭떎 怨꾩궛 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎: {e}"
++
+ 
+-def get_expiring_contracts(months_ahead: int = 3) -> str:
+-    '''
+-    ?ν썑 N媛쒖썡 ?대궡??留뚭린媛 ?꾨옒?섎뒗 怨꾩빟 紐⑸줉??議고쉶?⑸땲??
+-    '''
+-    limit_msg = _check_global_tool_limit()
+-    if limit_msg: return limit_msg
++def get_expiring_contracts(months_ahead: int = 3, asset_name: str = "") -> str:
++    """?ㅻ뒛遺??N媛쒖썡 ?대궡??留뚭린媛 ?꾨옒?섎뒗 ?좏슚(ACTIVE) 怨꾩빟 紐⑸줉??議고쉶?⑸땲??
+ 
++    Args:
++        months_ahead: 議고쉶??媛쒖썡 ??(?? 3)
++        asset_name: ?먯궛紐??쒓? 蹂꾩묶 媛??. 鍮꾩슦硫??꾩껜 ?먯궛.
++    """
+     try:
+-        conn = get_db_connection()
+-        query = f"""
+-            SELECT asset_name, floor, company_name, end_date, monthly_rent
++        assets = resolve_assets(asset_name)
++        if assets == []:
++            return _asset_not_found(asset_name)
++        sql = """
++            SELECT asset_name, floor, company_name, end_date, contract_area AS 怨꾩빟硫댁쟻_??
++                   deposit, monthly_rent, monthly_maintenance_fee, currency
+             FROM lease_contracts
+-            WHERE status = 'ACTIVE' 
+-              AND end_date <= CURRENT_DATE + INTERVAL '{months_ahead} months'
++            WHERE status = 'ACTIVE'
+               AND end_date >= CURRENT_DATE
+-            ORDER BY end_date ASC
++              AND end_date <= CURRENT_DATE + make_interval(months => :m)
+         """
+-        df = pd.read_sql_query(query, conn)
+-        conn.close()
+-        
++        params = {"m": int(months_ahead)}
++        expanding = ()
++        if assets:
++            sql += " AND asset_name IN :assets"
++            params["assets"] = assets
++            expanding = ("assets",)
++        sql += " ORDER BY end_date"
++        df = _read_sql(sql, params, expanding)
+         if df.empty:
+-            return f"?ν썑 {months_ahead}媛쒖썡 ?대궡??留뚭린媛 ?꾨옒?섎뒗 怨꾩빟???놁뒿?덈떎."
+-        return df.to_markdown()
++            return f"?ㅻ뒛({date.today():%Y-%m-%d})遺??{months_ahead}媛쒖썡 ?대궡??留뚭린媛 ?꾨옒?섎뒗 怨꾩빟???놁뒿?덈떎."
++        return f"[?ㅻ뒛({date.today():%Y-%m-%d})遺??{months_ahead}媛쒖썡 ?대궡 留뚭린 怨꾩빟]\n" + _df_to_text(df)
+     except Exception as e:
+-        return f"?ㅻ쪟 諛쒖깮! ?덈? ?ъ떆?꾪븯吏 留먭퀬 ?ъ슜?먯뿉寃??ш낵?섏꽭?? ?곸꽭: {e}"
+-
+-def compare_revenue(entity_name: str, entity_type: str, compare_type: str, base_year: int, base_month: int, target_year: int = None, target_month: int = None) -> str:
+-    '''
+-    ?뱀젙 ?먯궛(asset) ?먮뒗 ?꾩감??company)??湲곗????? ?鍮??섏씡(?꾨?猷?愿由щ퉬)??鍮꾧탳?⑸땲??
+-    - entity_type: "asset" ?먮뒗 "company"
+-    - compare_type: "MoM" (?꾩썡 ?鍮? ?먮뒗 "YoY" (?꾨뀈 ?숈썡 ?鍮? ?먮뒗 "YTD" (?꾨뀈 ?鍮??곌컙 珥앹닔?? ?먮뒗 "Custom" (?꾩쓽????鍮꾧탳)
+-    base_month: 湲곗? ??(1~12)
+-    "Custom"??寃쎌슦 target_year? target_month瑜?諛섎뱶???낅젰?섏꽭??(?? 2026??6???鍮?10??鍮꾧탳硫?base媛 10?? target??6??.
+-    '''
+-    limit_msg = _check_global_tool_limit()
+-    if limit_msg: return limit_msg
++        return f"留뚭린 怨꾩빟 議고쉶 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎: {e}"
++
++
++def compare_revenue(
++    entity_name: str,
++    entity_type: str,
++    compare_type: str,
++    base_year: int,
++    base_month: int = 0,
++    target_year: Optional[int] = None,
++    target_month: Optional[int] = None,
++) -> str:
++    """?먯궛, ?꾩감???먮뒗 ?꾩껜 ?ы듃?대━?ㅼ쓽 ?섏씡(?꾨?猷?愿由щ퉬, ?뚰듃濡?湲곗?)??湲곌컙蹂꾨줈 鍮꾧탳?⑸땲??
+ 
++    Args:
++        entity_name: ?먯궛紐??쒓? 蹂꾩묶 媛?? ?먮뒗 ?낆껜紐??쇰?). entity_type??'all'?대㈃ 鍮?臾몄옄??
++        entity_type: 'asset', 'company', 'all'(?꾩껜 ?ы듃?대━?? 以??섎굹
++        compare_type: 'MoM'(?꾩썡 ?鍮?, 'YoY'(?꾨뀈 ?숈썡 ?鍮?, 'YTD'(1??湲곗????꾧퀎 vs ?꾨뀈 ?숆린),
++            'Annual'(?곌컙 珥앹븸 vs ?꾨뀈), 'Custom'(?꾩쓽??????鍮꾧탳) 以??섎굹
++        base_year: 湲곗? ?곕룄
++        base_month: 湲곗? ??1~12). Annual?대㈃ 0.
++        target_year: Custom????鍮꾧탳 ????곕룄
++        target_month: Custom????鍮꾧탳 ????? ?? '6???鍮?10???대㈃ base=10?? target=6??+    """
+     try:
+-        if compare_type not in ["MoM", "YoY", "YTD", "Custom"]:
+-            return "compare_type? 'MoM', 'YoY', 'YTD', 'Custom' 以??섎굹?ъ빞 ?⑸땲??"
+-            
+-        sel_assets = None
+-        sel_companies = None
+-        
+-        if entity_type.lower() == "asset":
+-            import re
+-            asset_name_aliases = {
+-                r'蹂몄젏|蹂몄궗|?먯씠移섑걧|hq鍮뚮뵫|hq building|hq': 'HQ',
+-                r'遺??: 'Busan', r'?붿궛': 'Dunsan', r'愿묒＜': 'Gwangju',
+-                r'?좎떎': 'Jamsilseo', r'?≫뙆': 'Songpa', r'泥좎궛': 'Cheolsan Town',
+-                r'異섏쿇': 'Chuncheon', r'遺꾨떦': 'Bundang', r'?ы빆': 'Pohang',
+-                r'???: 'Daejeon', r'移⑥궛': 'Chimsan-dong',
+-            }
+-            mapped_asset = entity_name
+-            for pattern, real_key in asset_name_aliases.items():
+-                if re.search(pattern, entity_name, re.IGNORECASE):
+-                    mapped_asset = real_key
+-                    break
+-            sel_assets = [mapped_asset]
++        ct = (compare_type or "").strip().lower()
++        if ct not in ("mom", "yoy", "ytd", "annual", "custom"):
++            return "compare_type? 'MoM', 'YoY', 'YTD', 'Annual', 'Custom' 以??섎굹?ъ빞 ?⑸땲??"
++        by, bm = int(base_year), int(base_month or 0)
++        if ct in ("mom", "yoy", "custom") and not 1 <= bm <= 12:
++            return "base_month(1~12)瑜?吏?뺥빐???⑸땲??"
++
++        assets = companies = None
++        et = (entity_type or "").strip().lower()
++        label = "?꾩껜 ?ы듃?대━??
++        if et == "asset":
++            assets = resolve_assets(entity_name)
++            if assets == []:
++                return _asset_not_found(entity_name)
++            label = ", ".join(assets) if assets else label
++        elif et == "company":
++            companies = resolve_companies(entity_name)
++            if not companies:
++                return _company_not_found(entity_name)
++            label = ", ".join(companies)
++        elif et != "all":
++            return "entity_type? 'asset', 'company', 'all' 以??섎굹?ъ빞 ?⑸땲??"
++
++        a_key = tuple(assets) if assets else None
++        c_key = tuple(companies) if companies else None
++
++        if ct == "mom":
++            base = (by, [bm], f"{by}??{bm}??)
++            ty, tm = (by, bm - 1) if bm > 1 else (by - 1, 12)
++            target = (ty, [tm], f"{ty}??{tm}??)
++        elif ct == "yoy":
++            base = (by, [bm], f"{by}??{bm}??)
++            target = (by - 1, [bm], f"{by - 1}??{bm}??)
++        elif ct == "ytd":
++            m = bm if 1 <= bm <= 12 else 12
++            base = (by, list(range(1, m + 1)), f"{by}??1~{m}???꾧퀎")
++            target = (by - 1, list(range(1, m + 1)), f"{by - 1}??1~{m}???꾧퀎")
++        elif ct == "annual":
++            base = (by, list(range(1, 13)), f"{by}???곌컙")
++            target = (by - 1, list(range(1, 13)), f"{by - 1}???곌컙")
+         else:
+-            sel_companies = [entity_name]
+-
+-        def get_revenue(year, month):
+-            df_rr, _ = generate_annual_rent_roll(year, sel_assets=sel_assets, sel_companies=sel_companies)
+-            if df_rr.empty: return 0
+-            
+-            if month == "ALL":
+-                total = 0
+-                for m in range(1, 13):
+-                    r_col, m_col = f"{m}???꾨?猷?, f"{m}??愿由щ퉬"
+-                    if r_col in df_rr.columns: total += df_rr[r_col].sum()
+-                    if m_col in df_rr.columns: total += df_rr[m_col].sum()
+-                return total
+-            else:
+-                r_col, m_col = f"{month}???꾨?猷?, f"{month}??愿由щ퉬"
+-                total = 0
+-                if r_col in df_rr.columns: total += df_rr[r_col].sum()
+-                if m_col in df_rr.columns: total += df_rr[m_col].sum()
+-                return total
+-
+-        if compare_type == "MoM":
+-            target_year = base_year if base_month > 1 else base_year - 1
+-            target_month = base_month - 1 if base_month > 1 else 12
+-        elif compare_type == "YoY":
+-            target_year = base_year - 1
+-            target_month = base_month
+-        elif compare_type == "YTD":
+-            target_year = base_year - 1
+-            target_month = "ALL"
+-            base_month = "ALL"
+-        elif compare_type == "Custom":
+             if target_year is None or target_month is None:
+-                return "Custom 鍮꾧탳 ??target_year? target_month ?뚮씪誘명꽣媛 ?꾩슂?⑸땲??"
+-            
+-        rev_base = get_revenue(base_year, base_month)
+-        rev_target = get_revenue(target_year, target_month)
+-        
+-        diff = rev_base - rev_target
+-        rate = (diff / rev_target * 100) if rev_target > 0 else 0
+-        
+-        title_map = {"MoM": "?꾩썡 ?鍮?, "YoY": "?꾨뀈 ?숈썡 ?鍮?, "YTD": "?꾨뀈 ?鍮?珥?, "Custom": f"{target_year}??{target_month}???鍮?}
+-        title = title_map[compare_type]
+-        
+-        res = f"[{entity_name} ?섏씡 鍮꾧탳 ({title})]\n"
+-        if compare_type == "YTD":
+-            res += f"- {base_year}??珥앹닔?? {rev_base:,.0f}??n"
+-            res += f"- {target_year}??珥앹닔?? {rev_target:,.0f}??n"
++                return "Custom 鍮꾧탳?먮뒗 target_year? target_month媛 ?꾩슂?⑸땲??"
++            ty, tm = int(target_year), int(target_month)
++            base = (by, [bm], f"{by}??{bm}??)
++            target = (ty, [tm], f"{ty}??{tm}??)
++
++        def revenue(period):
++            year, months, _ = period
++            return _sum_months(_cached_rent_roll(year, a_key, c_key), months)
++
++        br, bmt = revenue(base)
++        tr, tmt = revenue(target)
++        b_total, t_total = br + bmt, tr + tmt
++        diff = b_total - t_total
++
++        res = [
++            f"[{label} ?섏씡 鍮꾧탳: {base[2]} vs {target[2]} (?뚰듃濡?湲곗?, ?먰솕 ?섏궛)]",
++            f"- {base[2]}: 珥?{_won(b_total)} (?꾨?猷?{br:,.0f} / 愿由щ퉬 {bmt:,.0f})",
++            f"- {target[2]}: 珥?{_won(t_total)} (?꾨?猷?{tr:,.0f} / 愿由щ퉬 {tmt:,.0f})",
++            f"- 利앷컧?? {diff:+,.0f}??,
++        ]
++        if t_total > 0:
++            res.append(f"- 利앷컧瑜? {diff / t_total * 100:+.1f}%")
+         else:
+-            res += f"- {base_year}??{base_month}???섏씡: {rev_base:,.0f}??n"
+-            res += f"- {target_year}??{target_month}???섏씡: {rev_target:,.0f}??n"
+-            
+-        res += f"- 利앷컧?? {diff:,.0f}??n"
+-        res += f"- 利앷컧瑜? {rate:.1f}%\n"
+-        
+-        return res
++            res.append("- 利앷컧瑜? 鍮꾧탳 湲곌컙 ?섏씡??0?먯씠??怨꾩궛?????놁뒿?덈떎.")
++        return "\n".join(res)
+     except Exception as e:
+-        return f"?ㅻ쪟 諛쒖깮! ?덈? ?ъ떆?꾪븯吏 留먭퀬 ?ъ슜?먯뿉寃??ш낵?섏꽭?? ?곸꽭: {e}"
++        return f"?섏씡 鍮꾧탳 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎: {e}"
++
+ 
+-def get_deposit_return_schedule(months_ahead: int = 3) -> str:
+-    '''
+-    ?ν썑 N媛쒖썡 ?대궡??留뚭린媛 ?꾨옒?섏뿬 諛섑솚?댁빞 ??蹂댁쬆湲?珥앹븸怨?怨꾩빟 紐⑸줉??議고쉶?⑸땲??
+-    '''
+-    limit_msg = _check_global_tool_limit()
+-    if limit_msg: return limit_msg
++def get_deposit_return_schedule(months_ahead: int = 3, asset_name: str = "") -> str:
++    """?ㅻ뒛遺??N媛쒖썡 ?대궡 留뚭린濡?諛섑솚?댁빞 ??蹂댁쬆湲?珥앹븸怨?怨꾩빟 紐⑸줉??議고쉶?⑸땲??
+ 
++    Args:
++        months_ahead: 議고쉶??媛쒖썡 ??+        asset_name: ?먯궛紐??쒓? 蹂꾩묶 媛??. 鍮꾩슦硫??꾩껜 ?먯궛.
++    """
+     try:
+-        conn = get_db_connection()
+-        query = f"""
+-            SELECT asset_name, floor, company_name, end_date, deposit
++        assets = resolve_assets(asset_name)
++        if assets == []:
++            return _asset_not_found(asset_name)
++        sql = """
++            SELECT asset_name, floor, company_name, end_date, deposit, currency
+             FROM lease_contracts
+-            WHERE status = 'ACTIVE' 
+-              AND end_date <= CURRENT_DATE + INTERVAL '{months_ahead} months'
++            WHERE status = 'ACTIVE'
+               AND end_date >= CURRENT_DATE
+-            ORDER BY end_date ASC
++              AND end_date <= CURRENT_DATE + make_interval(months => :m)
+         """
+-        df = pd.read_sql_query(query, conn)
+-        conn.close()
+-        
++        params = {"m": int(months_ahead)}
++        expanding = ()
++        if assets:
++            sql += " AND asset_name IN :assets"
++            params["assets"] = assets
++            expanding = ("assets",)
++        sql += " ORDER BY end_date"
++        df = _read_sql(sql, params, expanding)
+         if df.empty:
+-            return f"?ν썑 {months_ahead}媛쒖썡 ?대궡??諛섑솚 ?덉젙??蹂댁쬆湲덉씠 ?놁뒿?덈떎."
+-            
+-        total_deposit = df['deposit'].sum()
+-        res = f"[?ν썑 {months_ahead}媛쒖썡 ??蹂댁쬆湲?諛섑솚 ?덉젙?? {total_deposit:,.0f}??\n\n"
+-        res += df.to_markdown()
+-        return res
++            return f"?ㅻ뒛遺??{months_ahead}媛쒖썡 ?대궡??諛섑솚 ?덉젙??蹂댁쬆湲덉씠 ?놁뒿?덈떎."
++        total = sum(_to_krw(d, c) for d, c in zip(df["deposit"], df["currency"]))
++        return (
++            f"[?ㅻ뒛({date.today():%Y-%m-%d})遺??{months_ahead}媛쒖썡 ?대궡 蹂댁쬆湲?諛섑솚 ?덉젙?? {_won(total)}]\n\n"
++            + _df_to_text(df)
++        )
+     except Exception as e:
+-        return f"?ㅻ쪟 諛쒖깮! ?곸꽭: {e}"
++        return f"蹂댁쬆湲??쇱젙 議고쉶 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎: {e}"
+ 
+-def get_rent_per_pyung(entity_name: str, entity_type: str) -> str:
+-    '''
+-    ?뱀젙 ?먯궛(asset) ?꾩껜 ?먮뒗 ?꾩감??company)??怨꾩빟 硫댁쟻 ?鍮??됰떦 ?꾨?猷뚯? ?됰떦 愿由щ퉬瑜?怨꾩궛?⑸땲??
+-    entity_type? "asset" ?먮뒗 "company" 以??섎굹?ъ빞 ?⑸땲??
+-    '''
+-    limit_msg = _check_global_tool_limit()
+-    if limit_msg: return limit_msg
+ 
++def get_rent_per_pyung(entity_name: str = "", entity_type: str = "asset") -> str:
++    """?좏슚 怨꾩빟 湲곗? ?됰떦 ?꾨?猷? ?됰떦 愿由щ퉬, ?됰떦 珥앸퉬??NOC)??怨꾩궛?⑸땲?? 怨꾩빟硫댁쟻(?? 湲곗? 硫댁쟻媛以??됯퇏?낅땲??
++
++    Args:
++        entity_name: ?먯궛紐??쒓? 蹂꾩묶 媛?? ?먮뒗 ?낆껜紐??쇰?). 鍮꾩슦硫??꾩껜 ?먯궛???먯궛蹂꾨줈 鍮꾧탳.
++        entity_type: 'asset' ?먮뒗 'company'
++    """
+     try:
+-        conn = get_db_connection()
+-        query = """
+-            SELECT asset_name, floor, company_name, contract_area, monthly_rent, monthly_maintenance_fee
+-            FROM lease_contracts
+-            WHERE status = 'ACTIVE'
+-        """
+-        if entity_type.lower() == "asset":
+-            import re
+-            asset_name_aliases = {
+-                r'蹂몄젏|蹂몄궗|?먯씠移섑걧|hq鍮뚮뵫|hq building|hq': 'HQ',
+-                r'遺??: 'Busan', r'?붿궛': 'Dunsan', r'愿묒＜': 'Gwangju',
+-                r'?좎떎': 'Jamsilseo', r'?≫뙆': 'Songpa', r'泥좎궛': 'Cheolsan Town',
+-                r'異섏쿇': 'Chuncheon', r'遺꾨떦': 'Bundang', r'?ы빆': 'Pohang',
+-                r'???: 'Daejeon', r'移⑥궛': 'Chimsan-dong',
+-            }
+-            mapped_asset = entity_name
+-            for pattern, real_key in asset_name_aliases.items():
+-                if re.search(pattern, entity_name, re.IGNORECASE):
+-                    mapped_asset = real_key
+-                    break
+-            query += f" AND asset_name ILIKE '%%{mapped_asset}%%'"
+-        elif entity_type.lower() == "company":
+-            query += f" AND company_name ILIKE '%%{entity_name}%%'"
+-        else:
+-            return "entity_type? 'asset' ?먮뒗 'company'?ъ빞 ?⑸땲??"
+-            
+-        df = pd.read_sql_query(query, conn)
+-        conn.close()
+-        
++        df = fetch_data(
++            "SELECT asset_name, floor, company_name, contract_area, monthly_rent, "
++            "monthly_maintenance_fee, currency FROM lease_contracts WHERE status = 'ACTIVE'"
++        ).copy()
++        et = (entity_type or "asset").strip().lower()
++        label = "?꾩껜 ?먯궛"
++        if entity_name and entity_name.strip():
++            if et == "asset":
++                assets = resolve_assets(entity_name)
++                if assets == []:
++                    return _asset_not_found(entity_name)
++                df = df[df["asset_name"].isin(assets)]
++                label = ", ".join(assets)
++            elif et == "company":
++                companies = resolve_companies(entity_name)
++                if not companies:
++                    return _company_not_found(entity_name)
++                df = df[df["company_name"].isin(companies)]
++                label = ", ".join(companies)
++            else:
++                return "entity_type? 'asset' ?먮뒗 'company'?ъ빞 ?⑸땲??"
++
++        df["contract_area"] = pd.to_numeric(df["contract_area"], errors="coerce").fillna(0)
++        df = df[df["contract_area"] > 0]
+         if df.empty:
+-            return f"?대떦 {entity_type}??????쒖꽦 怨꾩빟 ?뺣낫媛 ?놁뒿?덈떎."
+-            
+-        total_area_sqm = df['contract_area'].sum()
+-        total_area_py = total_area_sqm / 3.3058
+-        total_rent = df['monthly_rent'].sum()
+-        total_maint = df['monthly_maintenance_fee'].sum()
+-        
+-        if total_area_py <= 0:
+-            return "怨꾩빟 硫댁쟻??0?댁뼱???됰떦 ?④?瑜?怨꾩궛?????놁뒿?덈떎."
+-            
+-        rent_per_py = total_rent / total_area_py
+-        maint_per_py = total_maint / total_area_py
+-        
+-        res = f"[{entity_name} ?됰떦 ?④? 遺꾩꽍]\n"
+-        res += f"- 珥?怨꾩빟硫댁쟻: {total_area_sqm:,.2f}??({total_area_py:,.2f}??\n"
+-        res += f"- 珥??붿엫?猷? {total_rent:,.0f}??n"
+-        res += f"- 珥??붽?由щ퉬: {total_maint:,.0f}??n"
+-        res += f"- ?됰떦 ?꾨?猷? {rent_per_py:,.0f}????n"
+-        res += f"- ?됰떦 愿由щ퉬: {maint_per_py:,.0f}????n"
+-        res += f"- NOC(?됰떦 珥앸퉬??: {(rent_per_py + maint_per_py):,.0f}????n"
+-        return res
++            return "硫댁쟻???덈뒗 ?좏슚 怨꾩빟???놁뼱 ?됰떦 ?④?瑜?怨꾩궛?????놁뒿?덈떎."
++        df["rent_krw"] = [_to_krw(v, c) for v, c in zip(df["monthly_rent"], df["currency"])]
++        df["maint_krw"] = [_to_krw(v, c) for v, c in zip(df["monthly_maintenance_fee"], df["currency"])]
++
++        area = df["contract_area"].sum()
++        rent_py = df["rent_krw"].sum() / area
++        maint_py = df["maint_krw"].sum() / area
++        res = [
++            f"[{label} ?됰떦 ?④? (?좏슚 怨꾩빟, 怨꾩빟硫댁쟻 湲곗? 硫댁쟻媛以? 理쒖큹 怨꾩빟 湲덉븸 湲곗?)]",
++            f"- 珥?怨꾩빟硫댁쟻: {area:,.2f}??({len(df)}嫄?",
++            f"- ???꾨?猷??⑷퀎: {_won(df['rent_krw'].sum())}",
++            f"- ??愿由щ퉬 ?⑷퀎: {_won(df['maint_krw'].sum())}",
++            f"- ?됰떦 ?꾨?猷? {rent_py:,.0f}????,
++            f"- ?됰떦 愿由щ퉬: {maint_py:,.0f}????,
++            f"- ?됰떦 珥앸퉬??NOC): {rent_py + maint_py:,.0f}????,
++        ]
++        group_col = "asset_name" if not (entity_name and entity_name.strip()) else "company_name"
++        g = df.groupby(group_col, as_index=False)[["contract_area", "rent_krw", "maint_krw"]].sum()
++        g["?됰떦?꾨?猷?] = (g["rent_krw"] / g["contract_area"]).round(0)
++        g["?됰떦愿由щ퉬"] = (g["maint_krw"] / g["contract_area"]).round(0)
++        g["?됰떦珥앸퉬??] = g["?됰떦?꾨?猷?] + g["?됰떦愿由щ퉬"]
++        g = g.rename(columns={"asset_name": "?먯궛", "company_name": "?낆껜", "contract_area": "怨꾩빟硫댁쟻(??"})
++        g = g.drop(columns=["rent_krw", "maint_krw"]).sort_values("?됰떦珥앸퉬??, ascending=False)
++        res.append("\n[?곸꽭]\n" + _df_to_text(g))
++        return "\n".join(res)
+     except Exception as e:
+-        return f"?ㅻ쪟 諛쒖깮! ?곸꽭: {e}"
++        return f"?됰떦 ?④? 怨꾩궛 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎: {e}"
++
++
++def get_current_rent_free_impact(year: int, month: int, asset_name: str = "") -> str:
++    """?뱀젙 ?곗썡???뚰듃?꾨━(?꾨?猷?硫댁젣)媛 ?곸슜?섎뒗 怨꾩빟 紐⑸줉怨?硫댁젣???꾨?猷?珥앹븸(湲고쉶鍮꾩슜)??怨꾩궛?⑸땲??
+ 
+-def get_current_rent_free_impact(year: int, month: int) -> str:
+-    '''
+-    ?뱀젙 ?곗썡(?? 2026??10?????뚰듃?꾨━瑜??곸슜諛쏅뒗 怨꾩빟?ㅼ쓽 紐⑸줉怨?李④컧??珥??꾨?猷?湲고쉶鍮꾩슜)瑜?怨꾩궛?⑸땲??
+-    '''
+-    limit_msg = _check_global_tool_limit()
+-    if limit_msg: return limit_msg
++    '10??蹂몄젏 ?뚰듃?꾨━ ?낆껜', '?ㅼ쓬???뚰듃?꾨━ ?곸슜 ?낆껜' 媛숈? 吏덈Ц???ъ슜?섏꽭??
+ 
++    Args:
++        year: ?곕룄 (?? 2026)
++        month: ??(1~12)
++        asset_name: ?먯궛紐??쒓? 蹂꾩묶 媛??. 鍮꾩슦硫??꾩껜 ?먯궛.
++    """
+     try:
+-        from utils import _is_rent_free_month, _parse_rent_free_details
+-        conn = get_db_connection()
+-        query = "SELECT asset_name, floor, company_name, start_date, end_date, monthly_rent, rent_free_details FROM lease_contracts WHERE status = 'ACTIVE'"
+-        df = pd.read_sql_query(query, conn)
+-        conn.close()
+-        
+-        impact_list = []
+-        total_impact = 0
+-        
++        y, m = int(year), int(month)
++        if not 1 <= m <= 12:
++            return "month??1~12 ?ъ씠?ъ빞 ?⑸땲??"
++        assets = resolve_assets(asset_name)
++        if assets == []:
++            return _asset_not_found(asset_name)
++
++        df = fetch_data(
++            "SELECT * FROM lease_contracts "
++            "WHERE rent_free_details IS NOT NULL AND rent_free_details NOT IN ('', '[]')"
++        )
++        if assets:
++            df = df[df["asset_name"].isin(assets)]
++
++        month_str = f"{y}-{m:02d}"
++        month_start = pd.Timestamp(y, m, 1)
++        month_end = month_start + pd.offsets.MonthEnd(0)
++        items = []
+         for _, row in df.iterrows():
+-            rf_details = row['rent_free_details']
+-            start_d = row['start_date']
+-            end_d = row['end_date']
+-            if not rf_details or pd.isna(rf_details): continue
+-            
+-            parsed = _parse_rent_free_details(rf_details)
+-            if not parsed: continue
+-            
+-            if _is_rent_free_month(year, month, start_d, end_d, parsed):
+-                rent = row['monthly_rent']
+-                total_impact += rent
+-                impact_list.append({
+-                    "?먯궛": row['asset_name'],
+-                    "?꾩감??: row['company_name'],
+-                    "?붿엫?猷?李④컧??: rent,
+-                    "?뚰듃?꾨━議곌굔": rf_details
+-                })
+-        
+-        if not impact_list:
+-            return f"{year}??{month}?붿뿉 ?뚰듃?꾨━媛 ?곸슜?섎뒗 怨꾩빟???놁뒿?덈떎."
+-            
+-        res_df = pd.DataFrame(impact_list)
+-        res = f"[{year}??{month}???뚰듃?꾨━ 湲고쉶鍮꾩슜 遺꾩꽍]\n"
+-        res += f"- ?뚰듃?꾨━濡??명빐 媛먯냼???꾨?猷?珥앹븸: {total_impact:,.0f}??n\n"
+-        res += res_df.to_markdown()
+-        return res
++            rf = _parse_json(row["rent_free_details"])
++            if not isinstance(rf, list) or month_str not in rf:
++                continue
++            start, end = pd.to_datetime(row["start_date"]), pd.to_datetime(row["end_date"])
++            if pd.isna(start) or pd.isna(end) or start > month_end or end < month_start:
++                continue
++            # ?뚰듃?꾨━媛 ?놁뿀?ㅻ㈃ 泥?뎄?먯쓣 湲덉븸(?몄긽 ?ㅼ?以? ?쇳븷 諛섏쁺)
++            rent, _ = get_actual_monthly_rent_by_company(
++                pd.DataFrame([row]), row["asset_name"], row["floor"], row["company_name"], y, m,
++                ignore_rent_free=True,
++            )
++            items.append({
++                "?먯궛": row["asset_name"],
++                "痢?: row["floor"],
++                "?꾩감??: row["company_name"],
++                "硫댁젣 ?꾨?猷???": round(_to_krw(rent, row.get("currency", "KRW"))),
++                "?뚰듃?꾨━ ?꾩껜 湲곌컙": ", ".join(rf),
++                "怨꾩빟?곹깭": row["status"],
++            })
++
++        label = ", ".join(assets) if assets else "?꾩껜 ?먯궛"
++        if not items:
++            return f"{y}??{m}?붿뿉 {label}?먯꽌 ?뚰듃?꾨━媛 ?곸슜?섎뒗 怨꾩빟???놁뒿?덈떎."
++        res_df = pd.DataFrame(items).sort_values(["?먯궛", "痢?])
++        total = res_df["硫댁젣 ?꾨?猷???"].sum()
++        return (
++            f"[{y}??{m}???뚰듃?꾨━ ?곸슜 怨꾩빟 ({label})]\n"
++            f"- ?곸슜 怨꾩빟 ?? {len(res_df)}嫄?n"
++            f"- 硫댁젣???꾨?猷?珥앹븸(湲고쉶鍮꾩슜): {_won(total)} (愿由щ퉬???뚰듃?꾨━ ????꾨떂)\n\n"
++            + _df_to_text(res_df)
++        )
+     except Exception as e:
+-        return f"?ㅻ쪟 諛쒖깮! ?곸꽭: {e}"
++        return f"?뚰듃?꾨━ 怨꾩궛 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎: {e}"
++
++
++TOOLS = [
++    get_contract_details,
++    get_vacancy_status,
++    get_expiring_contracts,
++    compare_revenue,
++    get_annual_rent_roll,
++    get_deposit_return_schedule,
++    get_rent_per_pyung,
++    get_current_rent_free_impact,
++    execute_sql_query,
++]
++TOOL_MAP = {fn.__name__: fn for fn in TOOLS}
++
++
++# ---------------------------------------------------------------------------
++# ?먯씠?꾪듃
++# ---------------------------------------------------------------------------
++def _find_key(d, key):
++    """以묒꺽???ㅼ젙?먯꽌 key瑜?李얠뒿?덈떎. (secrets.toml?먯꽌 ?ㅺ? ?ㅻⅨ ?뱀뀡 ?꾨옒???ㅼ뼱媛?寃쎌슦 ?鍮?"""
++    try:
++        if key in d:
++            return d[key]
++        for v in d.values():
++            if hasattr(v, "keys"):
++                found = _find_key(v, key)
++                if found:
++                    return found
++    except Exception:
++        pass
++    return None
++
+ 
+ def get_gemini_api_key():
+     try:
+-        if "GEMINI_API_KEY" in st.secrets:
+-            return st.secrets["GEMINI_API_KEY"]
+-    except:
++        found = _find_key(st.secrets, "GEMINI_API_KEY")
++        if found:
++            return found
++    except Exception:
+         pass
+     import os
++    import tomllib
++    secrets_path = os.path.join(os.getcwd(), ".streamlit", "secrets.toml")
+     try:
+-        secrets_path = os.path.join(os.getcwd(), ".streamlit", "secrets.toml")
+-        if os.path.exists(secrets_path):
+-            with open(secrets_path, "r", encoding="utf-8") as f:
+-                for line in f:
+-                    if line.startswith("GEMINI_API_KEY"):
+-                        return line.split("=")[1].strip().strip('"').strip("'")
+-    except:
+-        pass
+-    return None
++        with open(secrets_path, "rb") as f:
++            return _find_key(tomllib.load(f), "GEMINI_API_KEY")
++    except Exception:
++        return None
++
++
++@st.cache_resource(show_spinner=False)
++def _get_client(api_key: str):
++    from google import genai
++    return genai.Client(api_key=api_key)
++
+ 
+-def generate_chat_response(user_message, chat_history):
++def _month_shift(d: date, delta: int) -> str:
++    idx = d.year * 12 + (d.month - 1) + delta
++    return f"{idx // 12}??{idx % 12 + 1}??
++
++
++def _build_system_instruction() -> str:
++    today = date.today()
++    weekday = "?뷀솕?섎ぉ湲덊넗??[today.weekday()]
++    try:
++        names = _all_asset_names()
++    except Exception:
++        names = list(ASSET_ALIASES.keys())
++    alias_lines = "\n".join(
++        f"- {n}: {', '.join(ASSET_ALIASES.get(n, [])) or '(蹂꾩묶 ?놁쓬)'}" for n in names
++    )
++    return f"""?뱀떊? 遺?숈궛 ?먯궛愿由??뚯궗???곗씠??遺꾩꽍 ?댁떆?ㅽ꽩?몄엯?덈떎. ?щ궡 DB瑜??꾧뎄濡?議고쉶???뺥솗?섍쾶 ?듯빀?덈떎.
++
++# 湲곗? ?쒖젏
++- ?ㅻ뒛: {today:%Y-%m-%d} ({weekday}?붿씪)
++- ?대쾲?? {_month_shift(today, 0)}, ?ㅼ쓬?? {_month_shift(today, 1)}, 吏?쒕떖: {_month_shift(today, -1)}
++- ?곕룄 ?놁씠 ?붾쭔 留먰븯硫??ы빐({today.year}??濡??댁꽍?⑸땲?? '26??? 2026?꾩엯?덈떎.
++
++# ?먯궛紐?(DB ?곷Ц紐? ?ъ슜?먭? ?곕뒗 蹂꾩묶)
++{alias_lines}
++- ?꾩슜 ?꾧뎄?먮뒗 ?쒓? 蹂꾩묶??洹몃?濡??섍꺼???⑸땲?? SQL??吏곸젒 ?묒꽦???뚮뒗 諛섎뱶???곷Ц DB紐낆쓣 ?곗꽭??
++
++# ?곗씠??洹쒖튃
++- 硫댁쟻 ?⑥쐞??紐⑤몢 '???낅땲?? 湲덉븸? ??KRW)?대ŉ, currency='USD' 怨꾩빟? ?щ윭?낅땲??
++- monthly_rent/monthly_maintenance_fee??理쒖큹 怨꾩빟 湲덉븸?낅땲?? ?몄긽쨌?뚰듃?꾨━쨌?쇳븷??諛섏쁺???ㅼ젣 ?섏엯? ?뚰듃濡??꾧뎄濡?怨꾩궛?⑸땲??
++- ?꾩감?맞룰퀎??議곌굔 吏덈Ц? status='ACTIVE' 怨꾩빟??遊낅땲??
++- '?ㅻ뒛 ?쒖젏???ㅼ젣 ?먯쑀 以묒씤' 怨꾩빟? start_date <= ?ㅻ뒛 <= end_date ?대㈃??status IN ('ACTIVE','RENEWED')?낅땲??
++- ?뚰듃?꾨━ ?붿? rent_free_details??JSON 諛곗뿴(?? ["2026-10","2026-11"])濡???λ맗?덈떎.
++
++# ?꾧뎄 ?좏깮
++- ?꾩감??怨꾩빟 ?뺣낫: get_contract_details
++- 怨듭떎/怨듭떎瑜? get_vacancy_status
++- 留뚭린 ?꾨옒 怨꾩빟: get_expiring_contracts / 蹂댁쬆湲?諛섑솚 ?쇱젙: get_deposit_return_schedule
++- ?붾퀎쨌?곌컙 ?섏엯: get_annual_rent_roll / 湲곌컙 鍮꾧탳(?꾩썡, ?꾨뀈, ?꾧퀎, ?꾩쓽 ??: compare_revenue
++- ?됰떦 ?④?: get_rent_per_pyung / ?뱀젙 ???뚰듃?꾨━ ?낆껜? 湲고쉶鍮꾩슜: get_current_rent_free_impact
++- ?꾨줈 ?닿껐?섏? ?딅뒗 議고쉶(?꾩감??紐⑸줉, 議곌굔 寃????: execute_sql_query
++- ?쒕줈 ?낅┰?곸씤 議고쉶媛 ?щ윭 媛??꾩슂?섎㈃ ??踰덉뿉 蹂묐젹濡??몄텧?섏꽭??
++- ?꾧뎄媛 ?ㅻ쪟??'李얠? 紐삵븿'??諛섑솚?섎㈃, ?덈궡???곕씪 ?몄옄??荑쇰━瑜?怨좎퀜 ?ㅼ떆 ?쒕룄?섏꽭??
++
++# ?듬? ?묒꽦
++- 泥?臾몄옣??吏덈Ц?????寃곕줎(?듭떖 ?섏튂, ?낆껜紐???諛붾줈 留먰빀?덈떎.
++- 湲덉븸? 泥??⑥쐞 肄ㅻ쭏瑜??곌퀬, ??湲덉븸? ?듭썝/留뚯썝???④퍡 ?곸뒿?덈떎.
++- 3嫄??댁긽 ?섏뿴???뚮뒗 留덊겕?ㅼ슫 ?쒕? ?곷땲??
++- 湲곗??? ?ы븿 踰붿쐞(?? ?좏슚 怨꾩빟留? ?뚰듃濡?湲곗?)瑜???以꾨줈 諛앺옓?덈떎.
++- ?꾧뎄 寃곌낵???녿뒗 ?섏튂瑜?留뚮뱾嫄곕굹 異붿륫?섏? ?딆뒿?덈떎. ?곗씠?곌? ?놁쑝硫??녿떎怨?留먰빀?덈떎.
++- 吏덈Ц??紐⑦샇?섎㈃ 媛???⑸━?곸씤 ?댁꽍?쇰줈 ?듯븯怨? ?대뼸寃??댁꽍?덈뒗吏 吏㏐쾶 諛앺옓?덈떎.
++- ?쒓뎅?대줈, 媛꾧껐?섍쾶 ?듯빀?덈떎.
++
++# DB ?ㅽ궎留?(PostgreSQL)
++{DB_SCHEMA}
++"""
++
++
++def _history_to_contents(chat_history, types):
++    """UI??????대젰(list[dict] ?먮뒗 怨쇨굅 ?명솚??臾몄옄????Gemini Content 由ъ뒪?몃줈 蹂??"""
++    if not chat_history:
++        return []
++    if isinstance(chat_history, str):
++        return [types.Content(role="user", parts=[types.Part.from_text(text=f"[?댁쟾 ???\n{chat_history}")]),
++                types.Content(role="model", parts=[types.Part.from_text(text="?댁쟾 ????댁슜??李멸퀬?섍쿋?듬땲??")])]
++    contents = []
++    for m in chat_history[-HISTORY_MESSAGES:]:
++        content = str(m.get("content", "")).strip()
++        if not content:
++            continue
++        role = "model" if m.get("role") == "assistant" else "user"
++        contents.append(types.Content(role=role, parts=[types.Part.from_text(text=content)]))
++    while contents and contents[0].role == "model":  # ??붾뒗 user 硫붿떆吏濡??쒖옉?댁빞 ??+        contents.pop(0)
++    return contents
++
++
++def _coerce_args(fn, args: dict) -> dict:
++    """紐⑤뜽???뺤닔瑜??ㅼ닔(10.0)濡?蹂대궡??寃쎌슦 ?깆쓣 蹂댁젙?섍퀬, ?????녿뒗 ?몄옄??踰꾨┰?덈떎."""
++    sig = inspect.signature(fn)
++    out = {}
++    for k, v in args.items():
++        if k not in sig.parameters:
++            continue
++        ann = sig.parameters[k].annotation
++        if v is not None and ann in (int, Optional[int]):
++            try:
++                v = int(float(v))
++            except (TypeError, ValueError):
++                pass
++        out[k] = v
++    return out
++
++
++def _run_tool(name: str, args: dict) -> str:
++    fn = TOOL_MAP.get(name)
++    if fn is None:
++        return f"?????녿뒗 ?꾧뎄?낅땲?? {name}"
++    try:
++        return str(fn(**_coerce_args(fn, args)))
++    except TypeError as e:
++        return f"?꾧뎄 ?몄옄 ?ㅻ쪟: {e}. ?꾧뎄 ?ㅻ챸???몄옄 ?뺤떇??留욎떠 ?ㅼ떆 ?몄텧?섏꽭??"
++    except Exception as e:
++        return f"?꾧뎄 ?ㅽ뻾 以??ㅻ쪟: {e}"
++
++
++def _clip(result: str) -> str:
++    if len(result) <= MAX_RESULT_CHARS:
++        return result
++    return result[:MAX_RESULT_CHARS] + "\n...(寃곌낵媛 湲몄뼱 ?섎졇?듬땲?? 議곌굔??醫곹? ?ㅼ떆 議고쉶?섏꽭??)"
++
++
++def _is_transient(e: Exception) -> bool:
++    msg = str(e).lower()
++    return any(k in msg for k in ("503", "unavailable", "overloaded", "500", "internal", "deadline"))
++
++
++def _is_rate_limited(e: Exception) -> bool:
++    msg = str(e).lower()
++    return "429" in msg or "resource_exhausted" in msg or "quota" in msg
++
++
++def _friendly_error(e: Exception) -> str:
++    msg = str(e)
++    low = msg.lower()
++    if "429" in msg or "quota" in low or "resource_exhausted" in low:
++        return "API ?ъ슜???쒕룄???꾨떖?덉뒿?덈떎. 1遺??뺣룄 ?꾩뿉 ?ㅼ떆 吏덈Ц??二쇱꽭??"
++    if _is_transient(e):
++        return "Gemini ?쒕쾭媛 ?쇱떆?곸쑝濡??쇱옟?⑸땲?? ?좎떆 ???ㅼ떆 吏덈Ц??二쇱꽭??"
++    return f"?듬? ?앹꽦 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎: {msg[:300]}"
++
++
++def _stream_with_retry(client, contents, config, retries: int = 2):
++    """?쇱떆???쒕쾭 ?ㅻ쪟? 遺꾨떦 ?몄텧 ?쒕룄(429)??泥??묐떟 議곌컖??諛쏄린 ?꾧퉴吏留??ъ떆?꾪빀?덈떎."""
++    for attempt in range(retries + 1):
++        received = False
++        try:
++            for chunk in client.models.generate_content_stream(
++                model=MODEL_NAME, contents=contents, config=config
++            ):
++                received = True
++                yield chunk
++            return
++        except Exception as e:
++            if not received and attempt < retries:
++                if _is_transient(e):
++                    time.sleep(1.5 * (attempt + 1))
++                    continue
++                if _is_rate_limited(e):
++                    time.sleep(5 * (attempt + 1))  # 5珥? 10珥??湲????ъ떆??+                    continue
++            raise
++
++
++def stream_chat_response(user_message: str, chat_history=None):
++    """?듬????ㅽ듃由щ컢?섎뒗 ?쒕꼫?덉씠??
++
++    yield ?뺤떇: (kind, payload)
++      - ("status", 臾몄옄??: 吏꾪뻾 ?곹솴 (?? ?꾧뎄 ?ㅽ뻾 以?
++      - ("delta", 臾몄옄??: ?듬? ?띿뒪??議곌컖
++      - ("reset", None): 吏湲덇퉴吏 異쒕젰???띿뒪?몃? 吏? (?꾧뎄 ?몄텧 ??以묎컙 硫섑듃???寃쎌슦)
++    """
+     api_key = get_gemini_api_key()
+     if not api_key:
+-        return "GEMINI API ?ㅺ? ?ㅼ젙?섏? ?딆븯?듬땲?? ?깆쓣 ?ъ떆?묓빐 二쇱꽭??"
+-    
+-    from google import genai as genai_new
++        yield ("delta", "GEMINI_API_KEY媛 ?ㅼ젙?섏? ?딆븯?듬땲?? .streamlit/secrets.toml???뺤씤??二쇱꽭??")
++        return
++
+     from google.genai import types
+-    
+-    client = genai_new.Client(api_key=api_key)
+-    
+-    system_instruction = f'''
+-?뱀떊? 移쒖젅?섍퀬 ?꾨Ц?곸씤 遺?숈궛 ?먯궛愿由??댁떆?ㅽ꽩?몄엯?덈떎.
+-?ъ슜?먯쓽 吏덈Ц???뚯븙?섏뿬 ?곸젅???꾧뎄(Tool)瑜??ъ슜???듬??섏꽭??
+-
+-1. ?뱀젙 ?꾩감?몄쓽 怨꾩빟 ?곸꽭?뺣낫 議고쉶??`get_contract_details`瑜??ъ슜?섏꽭??
+-2. ?뱀젙 ?먯궛??怨듭떎 ?꾪솴?대굹 怨듭떎瑜좎쓣 臾쇱뼱蹂대㈃ `get_vacancy_status`瑜??ъ슜?섏꽭??
+-3. ?ν썑 留뚭린媛 ?꾨옒?섎뒗 怨꾩빟 紐⑸줉? `get_expiring_contracts`瑜??ъ슜?섏꽭??
+-4. ?섏씡 鍮꾧탳(?꾩썡 ?鍮? ?꾨뀈 ?鍮? ?꾩쓽????鍮꾧탳) 吏덈Ц? 諛섎뱶??`compare_revenue`瑜??ъ슜?섏꽭?? (?꾩쓽????鍮꾧탳?쒖뿉??compare_type??'Custom'?쇰줈 ?ㅼ젙?섍퀬 target_year? target_month瑜?紐낆떆?섏꽭??)
+-5. ?곌컙 ?꾨?猷??섏엯, ?뚰듃濡?珥앺빀 ???쇰컲?곸씤 怨꾩궛? `get_annual_rent_roll`???ъ슜?섏꽭??
+-6. [?좉퇋] 蹂댁쬆湲?諛섑솚 ?쇱젙 諛??ν썑 諛섑솚?댁빞 ??蹂댁쬆湲?洹쒕え??`get_deposit_return_schedule`???ъ슜?섏꽭??
+-7. [?좉퇋] ?뱀젙 ?먯궛?대굹 ?낆껜???됰떦 ?꾨?猷?愿由щ퉬 ?④? 遺꾩꽍? `get_rent_per_pyung`???ъ슜?섏꽭??
+-8. [?좉퇋] ?뱀젙 ?붿쓽 ?뚰듃?꾨━ ?곸슜 ?낆껜 紐⑸줉怨??대줈 ?명븳 湲고쉶鍮꾩슜(媛먯냼???꾨?猷?? `get_current_rent_free_impact`瑜??ъ슜?섏꽭??
+-9. ???꾧뎄?ㅻ줈 ?닿껐?섏? ?딅뒗 ?⑥닚 ?듦퀎??湲고? 議곌굔 寃?됱? `execute_sql_query`瑜??ъ슜?섏꽭?? (DB ?ㅽ궎留?\n{get_db_schema()})
+-10. ?꾧뎄瑜??몄텧?섏뿬 議고쉶??寃곌낵瑜?諛뷀깢?쇰줈 ?ъ슜?먯뿉寃?移쒖젅?섍퀬 ?댄빐?섍린 ?ъ슫 ?쒓? ?먯뿰?대줈 ?듬????묒꽦?섏꽭??
+-11. ?꾧뎄 ?몄텧? 理쒕? 5?뚭퉴吏留?媛?ν빀?덈떎. 5???덉뿉 ?듭쓣 ?꾩꽦?섏? 紐삵븯硫??ъ슜?먯뿉寃??붿쭅??留먰븯?몄슂.
+-'''
+-
+-    # ?ъ슜 媛?ν븳 ?꾧뎄 留?(?대쫫 -> ?⑥닔)
+-    tool_map = {
+-        "execute_sql_query": execute_sql_query,
+-        "get_annual_rent_roll": get_annual_rent_roll,
+-        "get_contract_details": get_contract_details,
+-        "get_vacancy_status": get_vacancy_status,
+-        "get_expiring_contracts": get_expiring_contracts,
+-        "compare_revenue": compare_revenue,
+-        "get_deposit_return_schedule": get_deposit_return_schedule,
+-        "get_rent_per_pyung": get_rent_per_pyung,
+-        "get_current_rent_free_impact": get_current_rent_free_impact,
+-    }
+-
+-    # google.genai???꾧뎄 ?뺤쓽
+-    tool_declarations = []
+-    for fn_name, fn in tool_map.items():
+-        # docstring?먯꽌 ?뚮씪誘명꽣 ?뺣낫 異붿텧 ??? 吏곸젒 ?⑥닔 媛앹껜瑜??꾨떖
+-        tool_declarations.append(fn)
+-
+-    MAX_TOOL_CALLS = 5
+ 
++    client = _get_client(api_key)
++    contents = _history_to_contents(chat_history, types)
++    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_message)]))
++
++    base_kwargs = dict(
++        system_instruction=_build_system_instruction(),
++        tools=TOOLS,
++        temperature=0.2,
++        # SDK???먮룞 ?⑥닔 ?ㅽ뻾???꾧퀬 吏곸젒 ?ㅽ뻾?⑸땲??蹂묐젹 ?몄텧 泥섎━, 吏꾪뻾 ?곹솴 ?쒖떆, ?쒕룄 ?쒖뼱).
++        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
++        # ?⑥닚 DB 議고쉶??吏덈Ц???遺遺꾩씠??源딆? 異붾줎蹂대떎 ?묐떟 ?띾룄媛 以묒슂?⑸땲??
++        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
++    )
++    config = types.GenerateContentConfig(**base_kwargs)
++    # 留덉?留??쇱슫?쒖뿉?쒕뒗 ?꾧뎄 ?몄텧??留됯퀬 吏湲덇퉴吏??寃곌낵濡??듯븯寃??⑸땲??
++    final_config = types.GenerateContentConfig(
++        **base_kwargs,
++        tool_config=types.ToolConfig(
++            function_calling_config=types.FunctionCallingConfig(mode=types.FunctionCallingConfigMode.NONE)
++        ),
++    )
++
++    total_calls = 0
++    emitted_any = False
+     try:
+-        prompt = f"[理쒓렐 ????붿빟]\n{chat_history}\n\n[?ъ슜??吏덈Ц]\n{user_message}"
+-        
+-        contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
+-        
+-        config = types.GenerateContentConfig(
+-            system_instruction=system_instruction,
+-            tools=tool_declarations,
+-            temperature=0.3,
+-        )
+-        
+-        tool_call_count = 0
+-
+-        while tool_call_count <= MAX_TOOL_CALLS:
+-            response = client.models.generate_content(
+-                model='gemini-3.5-flash',
+-                contents=contents,
+-                config=config,
+-            )
++        for round_idx in range(MAX_TOOL_ROUNDS + 1):
++            cfg = final_config if round_idx == MAX_TOOL_ROUNDS else config
++            parts, calls, emitted = [], [], False
++            for chunk in _stream_with_retry(client, contents, cfg):
++                cand = chunk.candidates[0] if chunk.candidates else None
++                if not cand or not cand.content or not cand.content.parts:
++                    continue
++                for p in cand.content.parts:
++                    parts.append(p)  # thought_signature 蹂댁〈???꾪빐 紐⑤뱺 part瑜?洹몃?濡?蹂닿?
++                    if p.function_call:
++                        calls.append(p.function_call)
++                    elif p.text and not p.thought:
++                        emitted = emitted_any = True
++                        yield ("delta", p.text)
+ 
+-            # ?묐떟?먯꽌 function_call 李얘린
+-            function_call_part = None
+-            text_response = None
+-            
+-            if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+-                for part in response.candidates[0].content.parts:
+-                    if part.function_call:
+-                        function_call_part = part
+-                    elif part.text:
+-                        text_response = part.text
+-
+-            # function_call???놁쑝硫??띿뒪???묐떟 諛섑솚
+-            if not function_call_part:
+-                if text_response:
+-                    return text_response
+-                return "二꾩넚?⑸땲?? ?붿껌?섏떊 ?뺣낫瑜?議고쉶?덉?留??듬????앹꽦?섏? 紐삵뻽?듬땲??"
+-
+-            tool_call_count += 1
+-            fc = function_call_part.function_call
+-            fn_name = fc.name
+-            fn_args = dict(fc.args) if fc.args else {}
+-
+-            # int ???蹂??(API媛 float?쇰줈 蹂대궡??寃쎌슦 ?鍮?
+-            import inspect
+-            if fn_name in tool_map:
+-                sig = inspect.signature(tool_map[fn_name])
+-                for param_name, param in sig.parameters.items():
+-                    if param_name in fn_args and param.annotation == int:
+-                        fn_args[param_name] = int(fn_args[param_name])
+-
+-            # ?꾧뎄 ?ㅽ뻾
+-            if fn_name in tool_map:
+-                try:
+-                    result = tool_map[fn_name](**fn_args)
+-                except Exception as e:
+-                    result = f"?꾧뎄 ?ㅽ뻾 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎: {e}"
+-            else:
+-                result = f"?????녿뒗 ?꾧뎄?낅땲?? {fn_name}"
+-
+-            # ????대젰??紐⑤뜽 ?묐떟 + ?꾧뎄 寃곌낵 異붽?
+-            contents.append(response.candidates[0].content)
+-            contents.append(
+-                types.Content(
+-                    role="tool",
+-                    parts=[types.Part.from_function_response(
+-                        name=fn_name,
+-                        response={"result": str(result)[:3000]}
+-                    )]
+-                )
+-            )
++            if not calls:
++                if not emitted:
++                    yield ("delta", "二꾩넚?⑸땲?? ?듬????앹꽦?섏? 紐삵뻽?듬땲?? 吏덈Ц??議곌툑 諛붽퓭???ㅼ떆 ?쒕룄??二쇱꽭??")
++                return
+ 
+-        return "二꾩넚?⑸땲?? 議고쉶 ?잛닔瑜?珥덇낵?섏뿬 ?듬????꾩꽦?섏? 紐삵뻽?듬땲?? 吏덈Ц??醫 ??援ъ껜?곸쑝濡??낅젰??二쇱꽭??"
++            if emitted:
++                yield ("reset", None)
++                emitted_any = False
++            contents.append(types.Content(role="model", parts=parts))
+ 
++            responses = []
++            for fc in calls:
++                total_calls += 1
++                yield ("status", f"?뵊 {TOOL_LABELS.get(fc.name, fc.name)} 以?..")
++                if total_calls > MAX_TOOL_CALLS:
++                    result = "?꾧뎄 ?몄텧 ?쒕룄瑜?珥덇낵?덉뒿?덈떎. 吏湲덇퉴吏 議고쉶??寃곌낵留뚯쑝濡??듬??섏꽭??"
++                else:
++                    result = _run_tool(fc.name, dict(fc.args or {}))
++                responses.append(types.Part.from_function_response(
++                    name=fc.name, response={"result": _clip(result)}
++                ))
++            contents.append(types.Content(role="user", parts=responses))
++            yield ("status", "?랃툘 ?듬? ?묒꽦 以?..")
+     except Exception as e:
+-        error_msg = str(e)
+-        if "429" in error_msg or "quota" in error_msg.lower():
+-            return "二꾩넚?⑸땲?? 臾대즺 API ?ъ슜?됱씠 珥덇낵?섏뿀?듬땲?? ?좎떆 ????1遺? ?ㅼ떆 吏덈Ц??二쇱꽭??"
+-        if "503" in error_msg or "unavailable" in error_msg.lower():
+-            return "二꾩넚?⑸땲?? ?꾩옱 援ш? AI ?쒕쾭(Gemini)?????멸퀎?곸씤 ?묒냽?먭? 紐곕젮 ?쇱떆?곸쑝濡??묐떟??吏?곕릺怨??덉뒿?덈떎. 10珥??뺣룄 ?꾩뿉 ?ㅼ떆 吏덈Ц??二쇱떆硫??뺤긽 ?묐룞??寃껋엯?덈떎."
+-        return f"二꾩넚?⑸땲?? ?듬????앹꽦?섎뒗 ?꾩쨷 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎: {e}"
++        if emitted_any:
++            yield ("delta", f"\n\n(?묐떟??以묐떒?섏뿀?듬땲?? {_friendly_error(e)})")
++        else:
++            yield ("reset", None)
++            yield ("delta", _friendly_error(e))
++
++
++def generate_chat_response(user_message: str, chat_history=None) -> str:
++    """?ㅽ듃由щ컢 ?놁씠 理쒖쥌 ?듬? 臾몄옄?대쭔 諛섑솚?⑸땲???뚯뒪???명솚??."""
++    answer = ""
++    for kind, payload in stream_chat_response(user_message, chat_history):
++        if kind == "delta":
++            answer += payload
++        elif kind == "reset":
++            answer = ""
++    return answer
+diff --git a/chatbot_ui.py b/chatbot_ui.py
+index 12169a8..f8cb025 100644
+--- a/chatbot_ui.py
++++ b/chatbot_ui.py
+@@ -1,36 +1,58 @@
+ import streamlit as st
+-from chatbot_agent_v2 import generate_chat_response
++from chatbot_agent_v2 import stream_chat_response
++
++GREETING = "?덈뀞?섏꽭?? ?먯궛쨌?꾨?李?怨꾩빟쨌?뚰듃濡ㅒ룰났???꾪솴 ??DB ?곗씠?곗뿉 ???臾쇱뼱蹂댁꽭??"
++
++
++def _safe_md(text: str) -> str:
++    # Streamlit 留덊겕?ㅼ슫? '~' ???띿쓣 痍⑥냼?좎쑝濡?泥섎━?섎?濡?'10~12?? 媛숈? 踰붿쐞 ?쒓린媛 源⑥?吏 ?딄쾶 ?댁뒪耳?댄봽
++    return text.replace("~", "\\~")
++
+ 
+ def render_chatbot():
+     st.sidebar.markdown("---")
+-    st.sidebar.markdown("### ?뮠 DB Data Q&A 梨쀫큸")
+-    st.sidebar.caption("遺?숈궛 ?먯궛, ?꾨?李?怨꾩빟, ?뚰듃濡??꾪솴??????먯쑀濡?쾶 臾쇱뼱蹂댁꽭??")
+-    
++    head_l, head_r = st.sidebar.columns([4, 1])
++    head_l.markdown("### ?뮠 DB Data Q&A 梨쀫큸")
++    if head_r.button("?뿊截?, help="???珥덇린??, key="chatbot_reset"):
++        st.session_state["chat_history"] = [{"role": "assistant", "content": GREETING}]
++    st.sidebar.caption("?? 蹂몄젏 怨듭떎瑜?/ ?ㅼ쓬???뚰듃?꾨━ ?낆껜 / ?ы빐 遺???꾨?猷??섏엯 / 3媛쒖썡 ??留뚭린 怨꾩빟")
++
+     if "chat_history" not in st.session_state:
+-        st.session_state["chat_history"] = [
+-            {"role": "assistant", "content": "?덈뀞?섏꽭?? ?곗씠?곕쿋?댁뒪???덈뒗 ?먯궛?대굹 ?낆껜???꾨?猷? 硫댁쟻 ?꾪솴 ?깆쓣 李얠븘?쒕┫寃뚯슂."}
+-        ]
+-        
+-    # ?ъ씠?쒕컮 ???ㅽ겕濡?媛?ν븳 而⑦뀒?대꼫
++        st.session_state["chat_history"] = [{"role": "assistant", "content": GREETING}]
++
+     chat_container = st.sidebar.container(height=450)
+-    
+     with chat_container:
+         for msg in st.session_state["chat_history"]:
+             with st.chat_message(msg["role"]):
+-                st.markdown(msg["content"])
+-                
+-    user_input = st.sidebar.chat_input("吏덈Ц???낅젰?섏꽭??.. (?? A?먯궛 珥??꾨?猷?")
+-    
+-    if user_input:
+-        st.session_state["chat_history"].append({"role": "user", "content": user_input})
+-        with chat_container:
+-            with st.chat_message("user"):
+-                st.markdown(user_input)
+-                
+-            with st.chat_message("assistant"):
+-                with st.spinner("DB瑜?議고쉶?섍퀬 ?듬????앹꽦?섎뒗 以?.."):
+-                    recent_history = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state["chat_history"][-5:-1]])
+-                    response = generate_chat_response(user_input, recent_history)
+-                    st.markdown(response)
+-                    
+-        st.session_state["chat_history"].append({"role": "assistant", "content": response})
++                st.markdown(_safe_md(msg["content"]))
++
++    user_input = st.sidebar.chat_input("吏덈Ц???낅젰?섏꽭??..")
++    if not user_input:
++        return
++
++    # ?몄궗留먯? 紐⑤뜽 而⑦뀓?ㅽ듃?먯꽌 ?쒖쇅
++    prior = [m for m in st.session_state["chat_history"] if m["content"] != GREETING]
++    st.session_state["chat_history"].append({"role": "user", "content": user_input})
++
++    with chat_container:
++        with st.chat_message("user"):
++            st.markdown(_safe_md(user_input))
++        with st.chat_message("assistant"):
++            status_ph = st.empty()
++            text_ph = st.empty()
++            status_ph.caption("?뮡 吏덈Ц??遺꾩꽍?섎뒗 以?..")
++            answer = ""
++            for kind, payload in stream_chat_response(user_input, prior):
++                if kind == "status":
++                    status_ph.caption(payload)
++                elif kind == "reset":
++                    answer = ""
++                    text_ph.empty()
++                elif kind == "delta":
++                    status_ph.empty()
++                    answer += payload
++                    text_ph.markdown(_safe_md(answer) + "??)
++            status_ph.empty()
++            text_ph.markdown(_safe_md(answer))
++
++    st.session_state["chat_history"].append({"role": "assistant", "content": answer})
+diff --git "a/pages/01_\353\247\210\354\212\244\355\204\260_\353\214\200\354\213\234\353\263\264\353\223\234.py" "b/pages/01_\353\247\210\354\212\244\355\204\260_\353\214\200\354\213\234\353\263\264\353\223\234.py"
+index 0552e53..1e18190 100644
+--- "a/pages/01_\353\247\210\354\212\244\355\204\260_\353\214\200\354\213\234\353\263\264\353\223\234.py"
++++ "b/pages/01_\353\247\210\354\212\244\355\204\260_\353\214\200\354\213\234\353\263\264\353\223\234.py"
+@@ -8,7 +8,11 @@ import plotly.express as px
+ import numpy as np
+ 
+ df_assets_md = fetch_data("SELECT * FROM Asset_Area")
+-df_leases_md = fetch_data("SELECT * FROM Lease_Contracts WHERE status = 'ACTIVE'")
++# 媛깆떊 怨꾩빟? ??怨꾩빟(ACTIVE)??誘몃옒???쒖옉?섍퀬 ?꾩옱 湲곌컙? 湲곗〈 怨꾩빟(RENEWED)????쑝誘濡?????議고쉶????+# ?꾨옒?먯꽌 ?ㅻ뒛 ?좎쭨媛 怨꾩빟湲곌컙???ы븿??怨꾩빟留?'?꾩옱 ?먯쑀'濡??④퉩?덈떎.
++df_leases_md = fetch_data(
++    "SELECT * FROM Lease_Contracts WHERE status IN ('ACTIVE', 'RENEWED') OR status IS NULL"
++)
+ 
+ if df_assets_md.empty:
+     st.warning("?깅줉???먯궛 ?뺣낫媛 ?놁뒿?덈떎.")
+diff --git "a/pages/03_\354\236\220\354\202\260\353\263\204_\355\206\265\355\225\251_\354\241\260\355\232\214.py" "b/pages/03_\354\236\220\354\202\260\353\263\204_\355\206\265\355\225\251_\354\241\260\355\232\214.py"
+index c741123..f9519ec 100644
+--- "a/pages/03_\354\236\220\354\202\260\353\263\204_\355\206\265\355\225\251_\354\241\260\355\232\214.py"
++++ "b/pages/03_\354\236\220\354\202\260\353\263\204_\355\206\265\355\225\251_\354\241\260\355\232\214.py"
+@@ -18,21 +18,10 @@ if not df_asset.empty:
+     if selected_assets:
+         df_asset = df_asset[df_asset["asset_name"].isin(selected_assets)]
+ 
+-    today_str = datetime.now().strftime("%Y-%m-%d")
+-    # ?꾩옱 ?쒖꽦?붾맂 怨꾩빟 硫댁쟻 ?곗텧
+-    df_leases = fetch_data(
+-        f"SELECT asset_name, floor, contract_exclusive_area FROM Lease_Contracts WHERE start_date <= '{today_str}' AND end_date >= '{today_str}' AND status = 'ACTIVE'"
+-    )
++    # ?ㅻ뒛 ?쒖젏 ?먯쑀 硫댁쟻 ?곗텧 (媛깆떊 ??怨꾩빟 ?ы븿, ?ㅼ링 怨꾩빟? 痢듬퀎 諛곕텇)
++    leased_area_df = get_current_leased_area_by_floor()
+ 
+-    if not df_leases.empty:
+-        leased_area_df = (
+-            df_leases.groupby(["asset_name", "floor"])["contract_exclusive_area"]
+-            .sum()
+-            .reset_index()
+-        )
+-        leased_area_df.rename(
+-            columns={"contract_exclusive_area": "leased_area"}, inplace=True
+-        )
++    if not leased_area_df.empty:
+         display_df = pd.merge(
+             df_asset, leased_area_df, on=["asset_name", "floor"], how="left"
+         )
+diff --git "a/pages/04_\354\212\244\355\203\234\355\202\271_\355\224\214\353\236\234.py" "b/pages/04_\354\212\244\355\203\234\355\202\271_\355\224\214\353\236\234.py"
+index 0bb23d5..22586bc 100644
+--- "a/pages/04_\354\212\244\355\203\234\355\202\271_\355\224\214\353\236\234.py"
++++ "b/pages/04_\354\212\244\355\203\234\355\202\271_\355\224\214\353\236\234.py"
+@@ -37,10 +37,8 @@ if sp_asset:
+         _eng=engine
+     )
+         
+-    df_leases_sp = fetch_data(
+-        f"SELECT floor, company_name, contract_area FROM Lease_Contracts WHERE asset_name = '{sp_asset}' AND status = 'ACTIVE' AND start_date <= '{today_str}' AND end_date >= '{today_str}'",
+-        _eng=engine
+-    )
++    # ?ㅻ뒛 ?쒖젏 ?먯쑀 怨꾩빟 (媛깆떊 ??怨꾩빟 ?ы븿, ?ㅼ링 怨꾩빟? 痢듬퀎 諛곕텇, 痢??꾩슜硫댁쟻怨?媛숈? ?꾩슜硫댁쟻 湲곗?)
++    df_leases_sp = get_current_leases_by_floor(sp_asset).rename(columns={"leased_area": "contract_area"})
+ 
+     # Sort floors dynamically
+     def floor_sort_key(f):
+diff --git "a/pages/09_\352\263\204\354\225\275_\354\240\225\353\263\264_\354\227\205\353\215\260\354\235\264\355\212\270.py" "b/pages/09_\352\263\204\354\225\275_\354\240\225\353\263\264_\354\227\205\353\215\260\354\235\264\355\212\270.py"
+index d93eee6..4f2db76 100644
+--- "a/pages/09_\352\263\204\354\225\275_\354\240\225\353\263\264_\354\227\205\353\215\260\354\235\264\355\212\270.py"
++++ "b/pages/09_\352\263\204\354\225\275_\354\240\225\353\263\264_\354\227\205\353\215\260\354\235\264\355\212\270.py"
+@@ -119,14 +119,85 @@ if update_mode == "???댁젏":
+                 "?꾩빟踰??꾩빟湲? 泥?뎄 ?≪닔", min_value=0, step=1000000
+             )
+ 
++    # 媛깆떊 怨꾩빟???꾩쭅 ?쒖옉 ?꾩씠硫? ?꾩옱 湲곌컙? 媛깆떊 ??怨꾩빟(RENEWED)????퀬 ?덉뒿?덈떎.
++    sel_start_date = pd.to_datetime(row_sel["start_date"]).date()
++    parent_row = None
++    if pd.notna(row_sel.get("parent_contract_id")):
++        df_parent = fetch_data(
++            f"SELECT * FROM Lease_Contracts WHERE contract_id = {int(row_sel['parent_contract_id'])} AND status = 'RENEWED'"
++        )
++        if not df_parent.empty:
++            parent_row = df_parent.iloc[0]
++    if parent_row is not None and sel_start_date > datetime.now().date():
++        st.info(
++            f"?뱄툘 ?좏깮??怨꾩빟? {sel_start_date}???쒖옉?섎뒗 媛깆떊 怨꾩빟?낅땲?? "
++            f"?꾩옱 湲곌컙? ?댁쟾 怨꾩빟(怨꾩빟ID {int(parent_row['contract_id'])}, ~{parent_row['end_date']})???곸슜 以묒엯?덈떎. "
++            "醫낅즺?쇱쓣 媛깆떊 怨꾩빟 ?쒖옉???댁쟾?쇰줈 ?낅젰?섎㈃ ?댁쟾 怨꾩빟??洹??좎쭨濡??댁젏 泥섎━?섍퀬, 媛깆떊 怨꾩빟? 痍⑥냼 泥섎━?⑸땲??"
++        )
++
+     if st.button(
+         "???좏깮 怨꾩빟 ?댁젏 泥섎━", type="primary", use_container_width=True
+     ):
++        cancel_renewal = new_end_date < sel_start_date
++        parent_start = pd.to_datetime(parent_row["start_date"]).date() if parent_row is not None else None
+         if (
+             new_end_date > pd.to_datetime(row_sel["end_date"]).date()
+             and term_type == "議곌린 醫낅즺"
+         ):
+             st.error("議곌린 醫낅즺?쇱? 湲곗〈 怨꾩빟 醫낅즺?쇰낫????쓣 ???놁뒿?덈떎.")
++        elif cancel_renewal and (parent_row is None or new_end_date < parent_start):
++            st.error("醫낅즺?쇱씠 怨꾩빟 ?쒖옉?쇰낫??鍮좊? ???놁뒿?덈떎.")
++        elif cancel_renewal:
++            # 媛깆떊 ??怨꾩빟 湲곌컙 以??댁젏: ?댁쟾 怨꾩빟???댁젏 泥섎━?섍퀬, ?쒖옉 ?꾩씤 媛깆떊 怨꾩빟? 痍⑥냼
++            try:
++                db_conn = engine.raw_connection()
++                try:
++                    c = db_conn.cursor()
++                    parent_id = int(parent_row["contract_id"])
++                    c.execute(
++                        """
++                        UPDATE Lease_Contracts
++                        SET status = 'TERMINATED', end_date = %s, deposit_return_date = %s, penalty_yn = %s, penalty_amount = %s
++                        WHERE contract_id = %s
++                    """,
++                        (
++                            new_end_date.strftime("%Y-%m-%d"),
++                            deposit_return_date.strftime("%Y-%m-%d"),
++                            penalty_yn,
++                            float(penalty_amount),
++                            parent_id,
++                        ),
++                    )
++                    # ?쒖옉 ??媛깆떊 怨꾩빟? 醫낅즺?쇱쓣 ?쒖옉???꾨궇濡??먯뼱 ?대뼡 ?ъ뿉??湲덉븸???≫엳吏 ?딄쾶 ??+                    c.execute(
++                        "UPDATE Lease_Contracts SET status = 'TERMINATED', end_date = %s WHERE contract_id = %s",
++                        ((sel_start_date - timedelta(days=1)).strftime("%Y-%m-%d"), target_contract_id),
++                    )
++                    today_str = datetime.now().strftime("%Y-%m-%d")
++                    month_str = datetime.now().strftime("%Y-%m")
++                    c.execute(
++                        "INSERT INTO Contract_History (contract_id, action_type, action_date, action_month, details) VALUES (%s, %s, %s, %s, %s)",
++                        (parent_id, "?댁젏", today_str, month_str, json.dumps(
++                            {"?좏삎": term_type, "醫낅즺??: new_end_date.strftime("%Y-%m-%d"), "?꾩빟湲?: penalty_amount,
++                             "痍⑥냼?쒓갚?좉퀎?폠D": target_contract_id}, ensure_ascii=False)),
++                    )
++                    c.execute(
++                        "INSERT INTO Contract_History (contract_id, action_type, action_date, action_month, details) VALUES (%s, %s, %s, %s, %s)",
++                        (target_contract_id, "媛깆떊痍⑥냼", today_str, month_str, json.dumps(
++                            {"?ъ쑀": "媛깆떊 怨꾩빟 ?쒖옉 ???댁젏", "?댁쟾怨꾩빟ID": parent_id}, ensure_ascii=False)),
++                    )
++                    db_conn.commit()
++                except Exception:
++                    db_conn.rollback()
++                    raise
++                finally:
++                    db_conn.close()
++                fetch_data.clear()
++                st.success(
++                    f"???댁쟾 怨꾩빟(怨꾩빟ID {parent_id})??{new_end_date}?먮줈 ?댁젏 泥섎━?섍퀬, ?쒖옉 ??媛깆떊 怨꾩빟? 痍⑥냼?덉뒿?덈떎."
++                )
++            except Exception as e:
++                st.error(f"?ㅻ쪟 諛쒖깮: {e}")
+         else:
+             try:
+                 db_conn = engine.raw_connection()
+@@ -644,11 +715,13 @@ elif update_mode in ["???좉퇋 怨꾩빟", "?봽 怨꾩빟 媛깆떊", "?뱷 湲곗〈 怨?                 importlib.reload(proposal_generator)
+                 from proposal_generator import generate_renewal_proposal
+ 
++                # 湲곗〈 議곌굔? 理쒖큹 怨꾩빟 湲덉븸???꾨땲??湲곗〈 怨꾩빟 醫낅즺??湲곗? ?ㅼ젣 湲덉븸(?몄긽遺?諛섏쁺)
++                old_rent_now, old_maint_now = get_contract_amount_at(row_sel, row_sel["end_date"])
+                 old_data = {
+                     "湲곗〈_珥앹엫?硫댁쟻_??: row_sel["contract_area"],
+                     "湲곗〈_?꾩슜硫댁쟻_??: row_sel.get("contract_exclusive_area", 0),
+-                    "湲곗〈_?붿엫?猷?: row_sel["monthly_rent"],
+-                    "湲곗〈_?붽?由щ퉬": row_sel["monthly_maintenance_fee"],
++                    "湲곗〈_?붿엫?猷?: old_rent_now,
++                    "湲곗〈_?붽?由щ퉬": old_maint_now,
+                     "湲곗〈_蹂댁쬆湲?: row_sel["deposit"],
+                     "湲곗〈_?꾨?李④린媛?: f"{row_sel['start_date']} ~ {row_sel['end_date']}",
+                 }
+@@ -671,6 +744,10 @@ elif update_mode in ["???좉퇋 怨꾩빟", "?봽 怨꾩빟 媛깆떊", "?뱷 湲곗〈 怨?                     "?꾨?猷뚮퉬怨?: "",
+                     "愿由щ퉬鍮꾧퀬": "",
+                     "湲곌컙鍮꾧퀬": "",
++                    # ?곗감蹂?湲덉븸: ?붾㈃?먯꽌 ?낅젰??湲곌컙蹂??ㅼ?以?諛섏쁺
++                    "step_ups": build_yearly_step_ups(
++                        rent_schedule_json, start_date, end_date, monthly_rent, monthly_maintenance_fee
++                    ),
+                 }
+ 
+                 df_comps = fetch_data(
+@@ -865,7 +942,7 @@ elif update_mode in ["???좉퇋 怨꾩빟", "?봽 怨꾩빟 媛깆떊", "?뱷 湲곗〈 怨?                                 contract_area, contract_exclusive_area, deposit, monthly_rent, monthly_maintenance_fee,
+                                 total_rent_free_months, rent_free_details, status,
+                                 currency, floor_details, escalation_cycle_years, rent_inc_rate, maint_inc_rate, rent_schedule, remarks
+-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s)
++                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s) RETURNING contract_id
+                         """,
+                             (
+                                 asset_name,
+@@ -890,7 +967,7 @@ elif update_mode in ["???좉퇋 怨꾩빟", "?봽 怨꾩빟 媛깆떊", "?뱷 湲곗〈 怨?                                 remarks,
+                             ),
+                         )
+-                        new_contract_id = c.lastrowid
++                        new_contract_id = c.fetchone()[0]
+ 
+                         c.execute(
+                             """
+@@ -949,7 +1026,7 @@ elif update_mode in ["???좉퇋 怨꾩빟", "?봽 怨꾩빟 媛깆떊", "?뱷 湲곗〈 怨?                                 contract_area, contract_exclusive_area, deposit, monthly_rent, monthly_maintenance_fee,
+                                 total_rent_free_months, rent_free_details, status, parent_contract_id,
+                                 currency, floor_details, escalation_cycle_years, rent_inc_rate, maint_inc_rate, rent_schedule, remarks
+-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s, %s)
++                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s, %s) RETURNING contract_id
+                         """,
+                             (
+                                 asset_name,
+@@ -975,7 +1052,7 @@ elif update_mode in ["???좉퇋 怨꾩빟", "?봽 怨꾩빟 媛깆떊", "?뱷 湲곗〈 怨?                                 remarks,
+                             ),
+                         )
+-                        new_contract_id = c.lastrowid
++                        new_contract_id = c.fetchone()[0]
+ 
+                         history_details["?댁쟾怨꾩빟ID"] = target_contract_id
+                         c.execute(
+@@ -1147,7 +1224,9 @@ elif update_mode == "?뱿 ?쇨큵 ?깅줉 (CSV/Excel)":
+         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+     )
+     st.info(
+-        "???ㅼ슫濡쒕뱶???묒떇??留욎떠 ?곗씠?곕? ?낅젰?섏떊 ???낅줈?쒗빐二쇱꽭?? 紐⑤뱺 怨꾩빟? '?⑥링'??湲곗??쇰줈 ?꾩떆 ?깅줉?섎ŉ, 蹂듭링 ???뱀닔 議곌굔? ?깅줉 ??媛쒕퀎 ?섏젙諛붾엻?덈떎."
++        "???ㅼ슫濡쒕뱶???묒떇??留욎떠 ?곗씠?곕? ?낅젰?섏떊 ???낅줈?쒗빐二쇱꽭?? 紐⑤뱺 怨꾩빟? '?⑥링'??湲곗??쇰줈 ?꾩떆 ?깅줉?섎ŉ, 蹂듭링 ???뱀닔 議곌굔? ?깅줉 ??媛쒕퀎 ?섏젙諛붾엻?덈떎.\n\n"
++        "???꾨?猷?愿由щ퉬 ?몄긽瑜?%)怨??몄긽 二쇨린(??瑜??낅젰?섎㈃ 怨꾩빟 ?쒖옉?쇰줈遺??二쇨린留덈떎 ?몄긽?섎뒗 湲곌컙蹂??ㅼ?以꾩씠 ?먮룞 ?앹꽦?⑸땲?? "
++        "?ㅼ젣 ?몄긽?쇱씠 怨꾩빟 ?쒖옉??湲곗?怨??ㅻⅤ硫??깅줉 ??'湲곗〈 怨꾩빟 ?섏젙'?먯꽌 ?ㅼ?以꾩쓣 議곗젙?댁＜?몄슂."
+     )
+ 
+     uploaded_file = st.file_uploader(
+@@ -1289,7 +1368,30 @@ elif update_mode == "?뱿 ?쇨큵 ?깅줉 (CSV/Excel)":
+                             floor_details_dict, ensure_ascii=False
+                         )
+ 
+-                        rent_schedule = [{"start_date": s_date, "end_date": e_date, "rent": rent, "maint": maint}]
++                        # ?몄긽瑜졖룹씤??二쇨린媛 ?덉쑝硫?怨꾩빟 ?쒖옉??湲곗? 二쇨린留덈떎 蹂듬━ ?몄긽??湲곌컙蹂??ㅼ?以??앹꽦
++                        # (怨쇨굅?먮뒗 ?몄긽 議곌굔????λ쭔 ?섍퀬 怨꾩궛???곗? ?딆븘 ?뚰듃濡ㅼ뿉 ?몄긽??諛섏쁺?섏? ?딆븯??
++                        rent_schedule = []
++                        s_ts, e_ts = pd.Timestamp(s_date), pd.Timestamp(e_date)
++                        if esc_cycle > 0 and (r_inc > 0 or m_inc > 0):
++                            step, p_start = 0, s_ts
++                            while p_start <= e_ts and step < 100:
++                                p_end = min(p_start + pd.DateOffset(years=esc_cycle) - pd.Timedelta(days=1), e_ts)
++                                p_rent = rent * (1 + r_inc / 100) ** step
++                                p_maint = maint * (1 + m_inc / 100) ** step
++                                if currency == "KRW":
++                                    p_rent, p_maint = round(p_rent), round(p_maint)
++                                else:
++                                    p_rent, p_maint = round(p_rent, 2), round(p_maint, 2)
++                                rent_schedule.append({
++                                    "start_date": p_start.strftime("%Y-%m-%d"),
++                                    "end_date": p_end.strftime("%Y-%m-%d"),
++                                    "rent": p_rent,
++                                    "maint": p_maint,
++                                })
++                                step += 1
++                                p_start = p_end + pd.Timedelta(days=1)
++                        if not rent_schedule:
++                            rent_schedule = [{"start_date": s_date, "end_date": e_date, "rent": rent, "maint": maint}]
+                         rent_schedule_json = json.dumps(rent_schedule, ensure_ascii=False)
+ 
+                         c.execute(
+@@ -1299,7 +1401,7 @@ elif update_mode == "?뱿 ?쇨큵 ?깅줉 (CSV/Excel)":
+                                 contract_area, contract_exclusive_area, deposit, monthly_rent, monthly_maintenance_fee,
+                                 total_rent_free_months, rent_free_details, status,
+                                 currency, floor_details, escalation_cycle_years, rent_inc_rate, maint_inc_rate, rent_schedule, remarks
+-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s)
++                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s) RETURNING contract_id
+                         """,
+                             (
+                                 asset_name,
+@@ -1325,7 +1427,7 @@ elif update_mode == "?뱿 ?쇨큵 ?깅줉 (CSV/Excel)":
+                             ),
+                         )
+ 
+-                        new_id = c.lastrowid
++                        new_id = c.fetchone()[0]
+                         history_details = {
+                             "怨꾩빟湲곌컙": f"{s_date} ~ {e_date}",
+                             "?듯솕": currency,
+diff --git "a/pages/10_\352\263\204\354\225\275_\353\263\200\352\262\275_\354\235\264\353\240\245.py" "b/pages/10_\352\263\204\354\225\275_\353\263\200\352\262\275_\354\235\264\353\240\245.py"
+index 684e094..74a6292 100644
+--- "a/pages/10_\352\263\204\354\225\275_\353\263\200\352\262\275_\354\235\264\353\240\245.py"
++++ "b/pages/10_\352\263\204\354\225\275_\353\263\200\352\262\275_\354\235\264\353\240\245.py"
+@@ -78,6 +78,8 @@ if not df_history.empty:
+         sel_hist_str = st.selectbox("?ㅼ슫濡쒕뱶??媛깆떊 ?대젰 ?좏깮", renewal_opts)
+         if sel_hist_str:
+             hist_id = int(sel_hist_str.split("]")[0][1:])
++            new_contract_id = None
++            old_contract_id = None
+             try:
+                 df_hist = fetch_data(f"SELECT contract_id, details FROM Contract_History WHERE history_id = {hist_id}")
+                 if not df_hist.empty:
+@@ -85,110 +87,124 @@ if not df_history.empty:
+                     details_str = df_hist.iloc[0]["details"]
+                     details_json = json.loads(details_str) if details_str else {}
+                     old_contract_id = details_json.get("?댁쟾怨꾩빟ID")
+-                else:
+-                    old_contract_id = None
+             except Exception as e:
+                 st.error(f"?대젰 議고쉶 以??ㅻ쪟 諛쒖깮: {e}")
+-                old_contract_id = None
+-
+-                if old_contract_id:
+-                    new_c = fetch_data(
+-                        f"SELECT * FROM Lease_Contracts WHERE contract_id = {new_contract_id}"
+-                    ).iloc[0]
+-                    old_c = fetch_data(
+-                        f"SELECT * FROM Lease_Contracts WHERE contract_id = {old_contract_id}"
+-                    ).iloc[0]
+-
+-                    import proposal_generator
+-                    import importlib
+-
+-                    importlib.reload(proposal_generator)
+-                    from proposal_generator import generate_renewal_proposal
+-
+-                    old_data = {
+-                        "湲곗〈_珥앹엫?硫댁쟻_??: old_c["contract_area"],
+-                        "湲곗〈_?꾩슜硫댁쟻_??: old_c.get("contract_exclusive_area", 0),
+-                        "湲곗〈_?붿엫?猷?: old_c["monthly_rent"],
+-                        "湲곗〈_?붽?由щ퉬": old_c["monthly_maintenance_fee"],
+-                        "湲곗〈_蹂댁쬆湲?: old_c["deposit"],
+-                        "湲곗〈_?꾨?李④린媛?: f"{old_c['start_date']} ~ {old_c['end_date']}",
+-                    }
+-                    new_data = {
+-                        "?먯궛二쇱냼": new_c["asset_name"],
+-                        "GPMS_ID": f"C-{old_contract_id}",
+-                        "?꾩감?몃챸": new_c["company_name"],
+-                        "遺?숈궛?ъ슜紐⑹쟻": "?낅Т?쒖꽕",
+-                        "?由ъ씤紐?: "",
+-                        "?꾨?痢?: new_c["floor"],
+-                        "?좉퇋_珥앹엫?硫댁쟻_??: new_c["contract_area"],
+-                        "?좉퇋_?꾩슜硫댁쟻_??: new_c.get("contract_exclusive_area", 0),
+-                        "媛깆떊_蹂댁쬆湲?: new_c["deposit"],
+-                        "媛깆떊_?붿엫?猷?: new_c["monthly_rent"],
+-                        "媛깆떊_?붽?由щ퉬": new_c["monthly_maintenance_fee"],
+-                        "媛깆떊_?꾨?李④린媛?: f"{new_c['start_date']} ~ {new_c['end_date']}",
+-                        "媛깆떊_?꾨??쒖옉??: new_c["start_date"],
+-                        "媛깆떊_?꾨?留뚮즺??: new_c["end_date"],
+-                        "蹂댁쬆湲덈퉬怨?: new_c["remarks"] if new_c["remarks"] else "",
+-                        "?꾨?猷뚮퉬怨?: "",
+-                        "愿由щ퉬鍮꾧퀬": "",
+-                        "湲곌컙鍮꾧퀬": "",
+-                    }
+-
+-                    df_comps = fetch_data(
+-                        f"SELECT floor, contract_area, deposit, monthly_rent, monthly_maintenance_fee FROM Lease_Contracts WHERE asset_name = '{new_c['asset_name']}' AND status = 'ACTIVE' AND contract_id != {new_contract_id}"
+-                    )
+-                    comps_data = [
+-                        {
+-                            "floor": row["floor"],
+-                            "contract_area": row["contract_area"],
+-                            "deposit": row["deposit"],
+-                            "monthly_rent": row["monthly_rent"],
+-                            "monthly_maintenance_fee": row["monthly_maintenance_fee"],
++
++            # 怨쇨굅 踰꾧렇濡??대젰??怨꾩빟踰덊샇媛 0?쇰줈 ??λ맂 寃쎌슦, ?댁쟾 怨꾩빟踰덊샇濡?媛깆떊 怨꾩빟??李얠븘 蹂댁셿
++            if old_contract_id and not new_contract_id:
++                df_child = fetch_data(
++                    f"SELECT contract_id FROM Lease_Contracts WHERE parent_contract_id = {int(old_contract_id)} ORDER BY contract_id DESC"
++                )
++                if not df_child.empty:
++                    new_contract_id = int(df_child.iloc[0]["contract_id"])
++
++            if not old_contract_id:
++                st.warning("?좏깮?섏떊 ?대젰?먮뒗 ?댁쟾 怨꾩빟 ?뺣낫媛 ?ы븿?섏뼱 ?덉? ?딆뒿?덈떎.")
++            elif not new_contract_id:
++                st.warning("?좏깮?섏떊 ?대젰??媛깆떊 怨꾩빟??李얠쓣 ???놁뒿?덈떎. (??젣??怨꾩빟?????덉뒿?덈떎)")
++            else:
++                try:
++                    df_new = fetch_data(f"SELECT * FROM Lease_Contracts WHERE contract_id = {new_contract_id}")
++                    df_old = fetch_data(f"SELECT * FROM Lease_Contracts WHERE contract_id = {int(old_contract_id)}")
++                    if df_new.empty or df_old.empty:
++                        st.warning("湲곗븞?쒖뿉 ?꾩슂??湲곗〈/媛깆떊 怨꾩빟 以??섎굹媛 ??젣?섏뼱 湲곗븞?쒕? 留뚮뱾 ???놁뒿?덈떎.")
++                    else:
++                        new_c = df_new.iloc[0]
++                        old_c = df_old.iloc[0]
++
++                        import proposal_generator
++                        import importlib
++
++                        importlib.reload(proposal_generator)
++                        from proposal_generator import generate_renewal_proposal
++
++                        # 湲곗〈 議곌굔? 理쒖큹 怨꾩빟 湲덉븸???꾨땲??媛깆떊 吏곸쟾(湲곗〈 怨꾩빟 醫낅즺?? 湲곗? ?ㅼ젣 湲덉븸
++                        old_rent_now, old_maint_now = get_contract_amount_at(old_c, old_c["end_date"])
++                        old_data = {
++                            "湲곗〈_珥앹엫?硫댁쟻_??: old_c["contract_area"],
++                            "湲곗〈_?꾩슜硫댁쟻_??: old_c.get("contract_exclusive_area", 0),
++                            "湲곗〈_?붿엫?猷?: old_rent_now,
++                            "湲곗〈_?붽?由щ퉬": old_maint_now,
++                            "湲곗〈_蹂댁쬆湲?: old_c["deposit"],
++                            "湲곗〈_?꾨?李④린媛?: f"{old_c['start_date']} ~ {old_c['end_date']}",
++                        }
++                        new_data = {
++                            "?먯궛二쇱냼": new_c["asset_name"],
++                            "GPMS_ID": f"C-{old_contract_id}",
++                            "?꾩감?몃챸": new_c["company_name"],
++                            "遺?숈궛?ъ슜紐⑹쟻": "?낅Т?쒖꽕",
++                            "?由ъ씤紐?: "",
++                            "?꾨?痢?: new_c["floor"],
++                            "?좉퇋_珥앹엫?硫댁쟻_??: new_c["contract_area"],
++                            "?좉퇋_?꾩슜硫댁쟻_??: new_c.get("contract_exclusive_area", 0),
++                            "媛깆떊_蹂댁쬆湲?: new_c["deposit"],
++                            "媛깆떊_?붿엫?猷?: new_c["monthly_rent"],
++                            "媛깆떊_?붽?由щ퉬": new_c["monthly_maintenance_fee"],
++                            "媛깆떊_?꾨?李④린媛?: f"{new_c['start_date']} ~ {new_c['end_date']}",
++                            "媛깆떊_?꾨??쒖옉??: str(new_c["start_date"]),
++                            "媛깆떊_?꾨?留뚮즺??: str(new_c["end_date"]),
++                            "蹂댁쬆湲덈퉬怨?: new_c["remarks"] if new_c["remarks"] else "",
++                            "?꾨?猷뚮퉬怨?: "",
++                            "愿由щ퉬鍮꾧퀬": "",
++                            "湲곌컙鍮꾧퀬": "",
++                            # ?곗감蹂?湲덉븸: 媛깆떊 怨꾩빟??湲곌컙蹂??ㅼ?以?諛섏쁺
++                            "step_ups": build_yearly_step_ups(
++                                new_c.get("rent_schedule"), new_c["start_date"], new_c["end_date"],
++                                new_c["monthly_rent"], new_c["monthly_maintenance_fee"],
++                            ),
+                         }
+-                        for _, row in df_comps.iterrows()
+-                    ]
+-
+-                    file_bytes, filename = generate_renewal_proposal(
+-                        old_data, new_data, comps_data
+-                    )
+-                        
+-                    col_dl1, col_dl2, col_dl3 = st.columns([4, 4, 2])
+-                    with col_dl1:
+-                        st.download_button(
+-                            "?뱿 ?좏깮???대젰 湲곗븞?뚯씪 ?ㅼ슫濡쒕뱶",
+-                            data=file_bytes,
+-                            file_name=filename,
+-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+-                            use_container_width=True,
++
++                        df_comps = fetch_data(
++                            f"SELECT floor, contract_area, deposit, monthly_rent, monthly_maintenance_fee FROM Lease_Contracts WHERE asset_name = '{new_c['asset_name']}' AND status = 'ACTIVE' AND contract_id != {new_contract_id}"
+                         )
+-                            
+-                    with col_dl2:
+-                        to_email_6 = st.text_input("?대찓??, label_visibility="collapsed", placeholder="?섏떊???대찓??二쇱냼 ?낅젰", key=f"email_tab6_{hist_id}")
+-                            
+-                    with col_dl3:
+-                        if st.button("?? 硫붿씪 諛쒖넚", key=f"btn_email_tab6_{hist_id}", use_container_width=True):
+-                            if to_email_6:
+-                                company_name = new_data.get('?꾩감?몃챸', '?낆껜')
+-                                success, err = send_email_with_attachment(
+-                                    to_email=to_email_6,
+-                                    subject=f"[PM/AM] {company_name} 媛깆떊 湲곗븞?쒕쪟",
+-                                    body=f"?붿껌?섏떊 {company_name}??媛깆떊 湲곗븞?쒕쪟(Excel)瑜?泥⑤??섏뿬 蹂대궡?쒕┰?덈떎.",
+-                                    file_bytes=file_bytes,
+-                                    file_name=filename,
+-                                    mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+-                                )
+-                                if success:
+-                                    st.toast("硫붿씪???깃났?곸쑝濡?諛쒖넚?섏뿀?듬땲??", icon="??)
++                        comps_data = [
++                            {
++                                "floor": row["floor"],
++                                "contract_area": row["contract_area"],
++                                "deposit": row["deposit"],
++                                "monthly_rent": row["monthly_rent"],
++                                "monthly_maintenance_fee": row["monthly_maintenance_fee"],
++                            }
++                            for _, row in df_comps.iterrows()
++                        ]
++
++                        file_bytes, filename = generate_renewal_proposal(
++                            old_data, new_data, comps_data
++                        )
++
++                        col_dl1, col_dl2, col_dl3 = st.columns([4, 4, 2])
++                        with col_dl1:
++                            st.download_button(
++                                "?뱿 ?좏깮???대젰 湲곗븞?뚯씪 ?ㅼ슫濡쒕뱶",
++                                data=file_bytes,
++                                file_name=filename,
++                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
++                                use_container_width=True,
++                            )
++
++                        with col_dl2:
++                            to_email_6 = st.text_input("?대찓??, label_visibility="collapsed", placeholder="?섏떊???대찓??二쇱냼 ?낅젰", key=f"email_tab6_{hist_id}")
++
++                        with col_dl3:
++                            if st.button("?? 硫붿씪 諛쒖넚", key=f"btn_email_tab6_{hist_id}", use_container_width=True):
++                                if to_email_6:
++                                    company_name = new_data.get('?꾩감?몃챸', '?낆껜')
++                                    success, err = send_email_with_attachment(
++                                        to_email=to_email_6,
++                                        subject=f"[PM/AM] {company_name} 媛깆떊 湲곗븞?쒕쪟",
++                                        body=f"?붿껌?섏떊 {company_name}??媛깆떊 湲곗븞?쒕쪟(Excel)瑜?泥⑤??섏뿬 蹂대궡?쒕┰?덈떎.",
++                                        file_bytes=file_bytes,
++                                        file_name=filename,
++                                        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
++                                    )
++                                    if success:
++                                        st.toast("硫붿씪???깃났?곸쑝濡?諛쒖넚?섏뿀?듬땲??", icon="??)
++                                    else:
++                                        st.error(f"硫붿씪 諛쒖넚 ?ㅽ뙣: {err}")
+                                 else:
+-                                    st.error(f"硫붿씪 諛쒖넚 ?ㅽ뙣: {err}")
+-                            else:
+-                                st.warning("?대찓??二쇱냼瑜??낅젰?댁＜?몄슂.")
+-                else:
+-                    st.warning(
+-                        "?좏깮?섏떊 ?대젰?먮뒗 ?댁쟾 怨꾩빟 ?뺣낫媛 ?ы븿?섏뼱 ?덉? ?딆뒿?덈떎."
+-                    )
+-            except Exception as e:
+-                st.error(f"?뚯씪 ?앹꽦 ?ㅻ쪟: {e}")
++                                    st.warning("?대찓??二쇱냼瑜??낅젰?댁＜?몄슂.")
++                except Exception as e:
++                    st.error(f"?뚯씪 ?앹꽦 ?ㅻ쪟: {e}")
+ else:
+     st.info("?꾩쭅 ?깅줉???낅뜲?댄듃 ?대젰???놁뒿?덈떎.")
+ 
+diff --git a/utils.py b/utils.py
+index c8e0cd0..22019e2 100644
+--- a/utils.py
++++ b/utils.py
+@@ -4,6 +4,7 @@ import plotly.express as px
+ import psycopg2
+ import psycopg2.extras
+ import calendar
++import functools
+ from datetime import datetime, timedelta
+ import json
+ import io
+@@ -411,7 +412,10 @@ CURRENCY_RATES = {
+ }
+ 
+ # Performance: Cache rent schedule parsing
+-@st.cache_data(ttl=1800, show_spinner=False)
++# st.cache_data???몄텧留덈떎 ?몄옄 ?댁떛/寃곌낵 蹂듭궗 鍮꾩슜??而ㅼ꽌, ?뚰듃濡?猷⑦봽泥섎읆
++# ?섎갚 踰??몄텧?섎뒗 寃쎈줈?먯꽌???ㅽ엳???먮┰?덈떎. ?낅젰??臾몄옄?댁씠誘濡?lru_cache濡?異⑸텇?⑸땲??
++# 諛섑솚 由ъ뒪?몃뒗 怨듭쑀 媛앹껜?대?濡??몄텧遺?먯꽌 ?섏젙?섏? 留덉꽭???꾩옱 紐⑤뱺 ?몄텧遺???쎄린 ?꾩슜).
++@functools.lru_cache(maxsize=2048)
+ def _parse_rent_schedule(rent_schedule_json):
+     """Parse and sort rent schedule once"""
+     import json
+@@ -461,6 +465,39 @@ def get_scheduled_amount(rent_schedule_json, target_date, default_rent, default_
+     return last_known_rent, last_known_maint
+ 
+ 
++def get_contract_amount_at(row, target_date):
++    """怨꾩빟 row???뱀젙 ?쇱옄 湲곗? ???꾨?猷?愿由щ퉬瑜?諛섑솚?⑸땲??(rent_schedule ?몄긽遺?諛섏쁺).
++
++    monthly_rent/monthly_maintenance_fee??理쒖큹 怨꾩빟 湲덉븸?대?濡? 媛깆떊 湲곗븞?쒖쓽 '湲곗〈 ?꾨?猷?泥섎읆
++    ?뱀젙 ?쒖젏???ㅼ젣 湲덉븸???꾩슂?????ъ슜?⑸땲??
++    """
++    def _num(v):
++        try:
++            return float(v) if v is not None and pd.notna(v) else 0.0
++        except (TypeError, ValueError):
++            return 0.0
++
++    sched = row.get("rent_schedule") if hasattr(row, "get") else None
++    if not isinstance(sched, str) or not sched.strip():
++        sched = None
++    return get_scheduled_amount(
++        sched, pd.Timestamp(target_date), _num(row.get("monthly_rent")), _num(row.get("monthly_maintenance_fee"))
++    )
++
++
++def build_yearly_step_ups(rent_schedule_json, start_date, end_date, default_rent, default_maint):
++    """怨꾩빟 ?쒖옉?쇰???1???⑥쐞濡?媛??곗감 泥ル궇?????꾨?猷?愿由щ퉬瑜?怨꾩궛?⑸땲??(媛깆떊 湲곗븞???곗감蹂?湲덉븸??."""
++    if not isinstance(rent_schedule_json, str) or not rent_schedule_json.strip():
++        rent_schedule_json = None
++    steps = []
++    d, end = pd.Timestamp(start_date), pd.Timestamp(end_date)
++    while d <= end and len(steps) < 20:
++        r, m = get_scheduled_amount(rent_schedule_json, d, float(default_rent or 0), float(default_maint or 0))
++        steps.append({"rent": r, "maint": m})
++        d = d + pd.DateOffset(years=1)
++    return steps
++
++
+ def highlight_total_row(row):
+     is_total = False
+     for val in row:
+@@ -949,7 +986,7 @@ def init_db():
+ 
+     conn.commit()
+ 
+-    c.execute("DROP TABLE IF EXISTS RentRoll_Overrides")
++    # 二쇱쓽: 怨쇨굅?먮뒗 ?ш린??DROP TABLE???ㅽ뻾?????ъ떆???뚮쭏???섎룞 議곗젙媛믪씠 ??젣?섏뿀?듬땲??
+     c.execute("""
+         CREATE TABLE IF NOT EXISTS RentRoll_Overrides (
+             contract_id INTEGER,
+@@ -997,6 +1034,61 @@ def fetch_data(query, _eng=None):
+         _eng = get_engine()
+     return pd.read_sql(query, _eng)
+ 
++# ?ㅻ뒛 ?쒖젏???ㅼ젣 ?먯쑀 以묒씤 怨꾩빟 議곌굔.
++# 媛깆떊 怨꾩빟? ??怨꾩빟(ACTIVE)??誘몃옒???쒖옉?섍퀬, ?꾩옱 湲곌컙? 湲곗〈 怨꾩빟(RENEWED)????퀬 ?덉쑝誘濡?+# status媛 ACTIVE ?먮뒗 RENEWED(?먮뒗 誘몄????대㈃???ㅻ뒛??怨꾩빟湲곌컙???ы븿??怨꾩빟???먯쑀濡?遊낅땲??
++CURRENT_OCCUPANCY_SQL = (
++    "(status IN ('ACTIVE', 'RENEWED') OR status IS NULL) "
++    "AND start_date <= CURRENT_DATE AND end_date >= CURRENT_DATE"
++)
++
++
++def get_current_leases_by_floor(asset_name=None):
++    """?ㅻ뒛 ?쒖젏 ?먯쑀 怨꾩빟??痢??⑥쐞濡??쇱퀜 諛섑솚?⑸땲??(?낆껜蹂????좎?).
++
++    ?ㅼ링 怨꾩빟(floor = '20,21')? floor_details??痢듬퀎 ?꾩슜硫댁쟻?쇰줈 ?섎닠 媛?痢듭뿉 諛곕텇?⑸땲??
++    痢듬퀎 exclusive_area媛 ?놁쑝硫?ratio 횞 怨꾩빟 ?꾩슜硫댁쟻?쇰줈 諛곕텇?⑸땲??
++
++    諛섑솚: DataFrame[asset_name, floor, company_name, leased_area] (?⑥쐞: ?? ?꾩슜硫댁쟻 湲곗?)
++    """
++    df = fetch_data(
++        "SELECT asset_name, floor, company_name, floor_details, contract_exclusive_area "
++        f"FROM Lease_Contracts WHERE {CURRENT_OCCUPANCY_SQL}"
++    )
++    if asset_name is not None:
++        df = df[df["asset_name"] == asset_name]
++    rows = []
++    for r in df.itertuples(index=False):
++        total_ex = float(r.contract_exclusive_area) if pd.notna(r.contract_exclusive_area) else 0.0
++        fd = None
++        if isinstance(r.floor_details, str) and r.floor_details.strip():
++            try:
++                fd = json.loads(r.floor_details)
++            except ValueError:
++                fd = None
++        if isinstance(fd, dict) and fd:
++            for fl, info in fd.items():
++                info = info if isinstance(info, dict) else {}
++                ex = info.get("exclusive_area")
++                if ex is None:
++                    ex = total_ex * float(info.get("ratio") or 0)
++                rows.append((r.asset_name, str(fl).strip(), r.company_name, float(ex or 0)))
++        else:
++            rows.append((r.asset_name, str(r.floor).strip(), r.company_name, total_ex))
++    return pd.DataFrame(rows, columns=["asset_name", "floor", "company_name", "leased_area"])
++
++
++def get_current_leased_area_by_floor():
++    """?ㅻ뒛 ?쒖젏 ?먯쑀 怨꾩빟???꾩슜硫댁쟻??(?먯궛, 痢? ?⑥쐞濡?吏묎퀎?⑸땲?? (?먯궛蹂??듯빀 議고쉶, 梨쀫큸 怨듭슜)
++
++    諛섑솚: DataFrame[asset_name, floor, leased_area] (?⑥쐞: ??
++    """
++    df = get_current_leases_by_floor()
++    if df.empty:
++        return pd.DataFrame(columns=["asset_name", "floor", "leased_area"])
++    return df.groupby(["asset_name", "floor"], as_index=False)["leased_area"].sum()
++
++
+ def execute_query(query, params=(), commit=True):
+     """
+     Helper function to execute INSERT/UPDATE/DELETE queries safely.
+@@ -1289,7 +1381,8 @@ def get_actual_monthly_rent_by_company(df_contracts_all, asset_name, floor, comp
+ 
+ 
+ 
+-def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None):
++def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None, start_month=None):
++    """start_month瑜??앸왂?섎㈃ 湲곗〈 ?붾㈃怨??숈씪?섍쾶 2026?꾩? 6?붾??? 洹????곕룄??1?붾???怨꾩궛?⑸땲??"""
+     import pandas as pd
+     from datetime import datetime, timedelta
+     import json
+@@ -1330,7 +1423,8 @@ def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None
+             currency_val = row["currency"] if "currency" in row and pd.notnull(row["currency"]) else "KRW"
+             group_key = (row["asset_name"], floor_name_unified, company_clean, currency_val)
+ 
+-            start_month = 6 if selected_year == 2026 else 1
++            if start_month is None:
++                start_month = 6 if selected_year == 2026 else 1
+ 
+             if group_key not in records_dict:
+                 records_dict[group_key] = {
+@@ -1340,11 +1434,13 @@ def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None
+                     "?낆껜紐?: company_clean,
+                     "?듯솕": currency_val,
+                     "_change_map": {},
++                    "_cids": set(),
+                 }
+                 for m in range(start_month, 13):
+                     records_dict[group_key][f"{m}???꾨?猷?] = 0.0
+                     records_dict[group_key][f"{m}??愿由щ퉬"] = 0.0
+ 
++            records_dict[group_key]["_cids"].add(row["contract_id"])
+             if row["status"] == "ACTIVE":
+                 records_dict[group_key]["Contract_ID"] = row["contract_id"]
+             
+@@ -1414,13 +1510,10 @@ def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None
+                     rent_to_charge_total = 0
+                     maint_to_charge_total = 0
+ 
+-                if (row["contract_id"], floor_name_unified, month) in overrides_dict:
+-                    o_rent, o_maint = overrides_dict[(row["contract_id"], floor_name_unified, month)]
+-                    floor_rent = o_rent
+-                    floor_maint = o_maint
+-                else:
+-                    floor_rent = rent_to_charge_total
+-                    floor_maint = maint_to_charge_total
++                # ?섎룞 議곗젙媛믪? 怨꾩빟 ?⑥쐞媛 ?꾨땲???뚰듃濡????낆껜쨌痢? ?⑥쐞濡??꾨옒?먯꽌 ?쇨큵 ?곸슜?⑸땲??
++                # (怨꾩빟 ?⑥쐞濡??곸슜?섎㈃ 媛깆떊 ?꽷룻썑 怨꾩빟???④퍡 ?덈뒗 ?ъ뿉 議곗젙媛믪씠 湲곗〈 湲덉븸???뷀빐吏?
++                floor_rent = rent_to_charge_total
++                floor_maint = maint_to_charge_total
+ 
+                 if currency != "KRW":
+                     floor_rent = round(floor_rent, 2)
+@@ -1462,6 +1555,25 @@ def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None
+         except Exception as e:
+             pass
+ 
++    # ?섎룞 議곗젙媛??곸슜: ?뚰듃濡??붾㈃? ?됱쓽 ???怨꾩빟踰덊샇(Contract_ID)濡?議곗젙媛믪쓣 ??ν븯誘濡?
++    # ?됱뿉 ?랁븳 怨꾩빟 以??대뒓 ?섎굹??議곗젙媛믪씠 ?덉쑝硫??대떦 ?붿쓽 ??湲덉븸??議곗젙媛믪쑝濡?'?泥??⑸땲??
++    # (?꾨?猷?蹂??異붿씠 ?붾㈃怨?媛숈? 諛⑹떇)
++    for rec in records_dict.values():
++        cids = rec.pop("_cids", set())
++        months_in_rec = [int(k.split("??)[0]) for k in rec if k.endswith("???꾨?猷?)]
++        for month in months_in_rec:
++            for cid in cids:
++                key = (cid, rec["痢?], month)
++                if key in overrides_dict:
++                    o_rent, o_maint = overrides_dict[key]
++                    o_rent = float(o_rent or 0)
++                    o_maint = float(o_maint or 0)
++                    if rec["?듯솕"] != "KRW":
++                        o_rent, o_maint = round(o_rent, 2), round(o_maint, 2)
++                    rec[f"{month}???꾨?猷?] = o_rent
++                    rec[f"{month}??愿由щ퉬"] = o_maint
++                    break
++
+     records = list(records_dict.values())
+     if records:
+         df_rr = pd.DataFrame(records)

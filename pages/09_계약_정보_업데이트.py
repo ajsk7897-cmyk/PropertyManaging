@@ -119,14 +119,85 @@ if update_mode == "❌ 퇴점":
                 "위약벌(위약금) 청구 액수", min_value=0, step=1000000
             )
 
+    # 갱신 계약이 아직 시작 전이면, 현재 기간은 갱신 전 계약(RENEWED)이 덮고 있습니다.
+    sel_start_date = pd.to_datetime(row_sel["start_date"]).date()
+    parent_row = None
+    if pd.notna(row_sel.get("parent_contract_id")):
+        df_parent = fetch_data(
+            f"SELECT * FROM Lease_Contracts WHERE contract_id = {int(row_sel['parent_contract_id'])} AND status = 'RENEWED'"
+        )
+        if not df_parent.empty:
+            parent_row = df_parent.iloc[0]
+    if parent_row is not None and sel_start_date > datetime.now().date():
+        st.info(
+            f"ℹ️ 선택한 계약은 {sel_start_date}에 시작하는 갱신 계약입니다. "
+            f"현재 기간은 이전 계약(계약ID {int(parent_row['contract_id'])}, ~{parent_row['end_date']})이 적용 중입니다. "
+            "종료일을 갱신 계약 시작일 이전으로 입력하면 이전 계약을 그 날짜로 퇴점 처리하고, 갱신 계약은 취소 처리합니다."
+        )
+
     if st.button(
         "❌ 선택 계약 퇴점 처리", type="primary", use_container_width=True
     ):
+        cancel_renewal = new_end_date < sel_start_date
+        parent_start = pd.to_datetime(parent_row["start_date"]).date() if parent_row is not None else None
         if (
             new_end_date > pd.to_datetime(row_sel["end_date"]).date()
             and term_type == "조기 종료"
         ):
             st.error("조기 종료일은 기존 계약 종료일보다 늦을 수 없습니다.")
+        elif cancel_renewal and (parent_row is None or new_end_date < parent_start):
+            st.error("종료일이 계약 시작일보다 빠를 수 없습니다.")
+        elif cancel_renewal:
+            # 갱신 전 계약 기간 중 퇴점: 이전 계약을 퇴점 처리하고, 시작 전인 갱신 계약은 취소
+            try:
+                db_conn = engine.raw_connection()
+                try:
+                    c = db_conn.cursor()
+                    parent_id = int(parent_row["contract_id"])
+                    c.execute(
+                        """
+                        UPDATE Lease_Contracts
+                        SET status = 'TERMINATED', end_date = %s, deposit_return_date = %s, penalty_yn = %s, penalty_amount = %s
+                        WHERE contract_id = %s
+                    """,
+                        (
+                            new_end_date.strftime("%Y-%m-%d"),
+                            deposit_return_date.strftime("%Y-%m-%d"),
+                            penalty_yn,
+                            float(penalty_amount),
+                            parent_id,
+                        ),
+                    )
+                    # 시작 전 갱신 계약은 종료일을 시작일 전날로 두어 어떤 달에도 금액이 잡히지 않게 함
+                    c.execute(
+                        "UPDATE Lease_Contracts SET status = 'TERMINATED', end_date = %s WHERE contract_id = %s",
+                        ((sel_start_date - timedelta(days=1)).strftime("%Y-%m-%d"), target_contract_id),
+                    )
+                    today_str = datetime.now().strftime("%Y-%m-%d")
+                    month_str = datetime.now().strftime("%Y-%m")
+                    c.execute(
+                        "INSERT INTO Contract_History (contract_id, action_type, action_date, action_month, details) VALUES (%s, %s, %s, %s, %s)",
+                        (parent_id, "퇴점", today_str, month_str, json.dumps(
+                            {"유형": term_type, "종료일": new_end_date.strftime("%Y-%m-%d"), "위약금": penalty_amount,
+                             "취소된갱신계약ID": target_contract_id}, ensure_ascii=False)),
+                    )
+                    c.execute(
+                        "INSERT INTO Contract_History (contract_id, action_type, action_date, action_month, details) VALUES (%s, %s, %s, %s, %s)",
+                        (target_contract_id, "갱신취소", today_str, month_str, json.dumps(
+                            {"사유": "갱신 계약 시작 전 퇴점", "이전계약ID": parent_id}, ensure_ascii=False)),
+                    )
+                    db_conn.commit()
+                except Exception:
+                    db_conn.rollback()
+                    raise
+                finally:
+                    db_conn.close()
+                fetch_data.clear()
+                st.success(
+                    f"✅ 이전 계약(계약ID {parent_id})을 {new_end_date}자로 퇴점 처리하고, 시작 전 갱신 계약은 취소했습니다."
+                )
+            except Exception as e:
+                st.error(f"오류 발생: {e}")
         else:
             try:
                 db_conn = engine.raw_connection()
@@ -644,11 +715,13 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                 importlib.reload(proposal_generator)
                 from proposal_generator import generate_renewal_proposal
 
+                # 기존 조건은 최초 계약 금액이 아니라 기존 계약 종료일 기준 실제 금액(인상분 반영)
+                old_rent_now, old_maint_now = get_contract_amount_at(row_sel, row_sel["end_date"])
                 old_data = {
                     "기존_총임대면적_평": row_sel["contract_area"],
                     "기존_전용면적_평": row_sel.get("contract_exclusive_area", 0),
-                    "기존_월임대료": row_sel["monthly_rent"],
-                    "기존_월관리비": row_sel["monthly_maintenance_fee"],
+                    "기존_월임대료": old_rent_now,
+                    "기존_월관리비": old_maint_now,
                     "기존_보증금": row_sel["deposit"],
                     "기존_임대차기간": f"{row_sel['start_date']} ~ {row_sel['end_date']}",
                 }
@@ -671,6 +744,10 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                     "임대료비고": "",
                     "관리비비고": "",
                     "기간비고": "",
+                    # 연차별 금액: 화면에서 입력한 기간별 스케줄 반영
+                    "step_ups": build_yearly_step_ups(
+                        rent_schedule_json, start_date, end_date, monthly_rent, monthly_maintenance_fee
+                    ),
                 }
 
                 df_comps = fetch_data(
@@ -865,7 +942,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                                 contract_area, contract_exclusive_area, deposit, monthly_rent, monthly_maintenance_fee,
                                 total_rent_free_months, rent_free_details, status,
                                 currency, floor_details, escalation_cycle_years, rent_inc_rate, maint_inc_rate, rent_schedule, remarks
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s)
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s) RETURNING contract_id
                         """,
                             (
                                 asset_name,
@@ -890,7 +967,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                                 remarks,
                             ),
                         )
-                        new_contract_id = c.lastrowid
+                        new_contract_id = c.fetchone()[0]
 
                         c.execute(
                             """
@@ -949,7 +1026,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                                 contract_area, contract_exclusive_area, deposit, monthly_rent, monthly_maintenance_fee,
                                 total_rent_free_months, rent_free_details, status, parent_contract_id,
                                 currency, floor_details, escalation_cycle_years, rent_inc_rate, maint_inc_rate, rent_schedule, remarks
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s, %s)
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s, %s) RETURNING contract_id
                         """,
                             (
                                 asset_name,
@@ -975,7 +1052,7 @@ elif update_mode in ["✨ 신규 계약", "🔄 계약 갱신", "📝 기존 계
                                 remarks,
                             ),
                         )
-                        new_contract_id = c.lastrowid
+                        new_contract_id = c.fetchone()[0]
 
                         history_details["이전계약ID"] = target_contract_id
                         c.execute(
@@ -1147,7 +1224,9 @@ elif update_mode == "📥 일괄 등록 (CSV/Excel)":
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     st.info(
-        "※ 다운로드한 양식에 맞춰 데이터를 입력하신 후 업로드해주세요. 모든 계약은 '단층'을 기준으로 임시 등록되며, 복층 등 특수 조건은 등록 후 개별 수정바랍니다."
+        "※ 다운로드한 양식에 맞춰 데이터를 입력하신 후 업로드해주세요. 모든 계약은 '단층'을 기준으로 임시 등록되며, 복층 등 특수 조건은 등록 후 개별 수정바랍니다.\n\n"
+        "※ 임대료/관리비 인상률(%)과 인상 주기(년)를 입력하면 계약 시작일로부터 주기마다 인상되는 기간별 스케줄이 자동 생성됩니다. "
+        "실제 인상일이 계약 시작일 기준과 다르면 등록 후 '기존 계약 수정'에서 스케줄을 조정해주세요."
     )
 
     uploaded_file = st.file_uploader(
@@ -1289,7 +1368,30 @@ elif update_mode == "📥 일괄 등록 (CSV/Excel)":
                             floor_details_dict, ensure_ascii=False
                         )
 
-                        rent_schedule = [{"start_date": s_date, "end_date": e_date, "rent": rent, "maint": maint}]
+                        # 인상률·인상 주기가 있으면 계약 시작일 기준 주기마다 복리 인상된 기간별 스케줄 생성
+                        # (과거에는 인상 조건을 저장만 하고 계산에 쓰지 않아 렌트롤에 인상이 반영되지 않았음)
+                        rent_schedule = []
+                        s_ts, e_ts = pd.Timestamp(s_date), pd.Timestamp(e_date)
+                        if esc_cycle > 0 and (r_inc > 0 or m_inc > 0):
+                            step, p_start = 0, s_ts
+                            while p_start <= e_ts and step < 100:
+                                p_end = min(p_start + pd.DateOffset(years=esc_cycle) - pd.Timedelta(days=1), e_ts)
+                                p_rent = rent * (1 + r_inc / 100) ** step
+                                p_maint = maint * (1 + m_inc / 100) ** step
+                                if currency == "KRW":
+                                    p_rent, p_maint = round(p_rent), round(p_maint)
+                                else:
+                                    p_rent, p_maint = round(p_rent, 2), round(p_maint, 2)
+                                rent_schedule.append({
+                                    "start_date": p_start.strftime("%Y-%m-%d"),
+                                    "end_date": p_end.strftime("%Y-%m-%d"),
+                                    "rent": p_rent,
+                                    "maint": p_maint,
+                                })
+                                step += 1
+                                p_start = p_end + pd.Timedelta(days=1)
+                        if not rent_schedule:
+                            rent_schedule = [{"start_date": s_date, "end_date": e_date, "rent": rent, "maint": maint}]
                         rent_schedule_json = json.dumps(rent_schedule, ensure_ascii=False)
 
                         c.execute(
@@ -1299,7 +1401,7 @@ elif update_mode == "📥 일괄 등록 (CSV/Excel)":
                                 contract_area, contract_exclusive_area, deposit, monthly_rent, monthly_maintenance_fee,
                                 total_rent_free_months, rent_free_details, status,
                                 currency, floor_details, escalation_cycle_years, rent_inc_rate, maint_inc_rate, rent_schedule, remarks
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s)
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s, %s, %s, %s, %s, %s) RETURNING contract_id
                         """,
                             (
                                 asset_name,
@@ -1325,7 +1427,7 @@ elif update_mode == "📥 일괄 등록 (CSV/Excel)":
                             ),
                         )
 
-                        new_id = c.lastrowid
+                        new_id = c.fetchone()[0]
                         history_details = {
                             "계약기간": f"{s_date} ~ {e_date}",
                             "통화": currency,

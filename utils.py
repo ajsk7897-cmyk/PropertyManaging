@@ -4,6 +4,7 @@ import plotly.express as px
 import psycopg2
 import psycopg2.extras
 import calendar
+import functools
 from datetime import datetime, timedelta
 import json
 import io
@@ -411,7 +412,10 @@ CURRENCY_RATES = {
 }
 
 # Performance: Cache rent schedule parsing
-@st.cache_data(ttl=1800, show_spinner=False)
+# st.cache_data는 호출마다 인자 해싱/결과 복사 비용이 커서, 렌트롤 루프처럼
+# 수백 번 호출되는 경로에서는 오히려 느립니다. 입력이 문자열이므로 lru_cache로 충분합니다.
+# 반환 리스트는 공유 객체이므로 호출부에서 수정하지 마세요(현재 모든 호출부는 읽기 전용).
+@functools.lru_cache(maxsize=2048)
 def _parse_rent_schedule(rent_schedule_json):
     """Parse and sort rent schedule once"""
     import json
@@ -459,6 +463,39 @@ def get_scheduled_amount(rent_schedule_json, target_date, default_rent, default_
             last_known_maint = float(period.get("maint", 0.0))
     
     return last_known_rent, last_known_maint
+
+
+def get_contract_amount_at(row, target_date):
+    """계약 row의 특정 일자 기준 월 임대료/관리비를 반환합니다 (rent_schedule 인상분 반영).
+
+    monthly_rent/monthly_maintenance_fee는 최초 계약 금액이므로, 갱신 기안서의 '기존 임대료'처럼
+    특정 시점의 실제 금액이 필요할 때 사용합니다.
+    """
+    def _num(v):
+        try:
+            return float(v) if v is not None and pd.notna(v) else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    sched = row.get("rent_schedule") if hasattr(row, "get") else None
+    if not isinstance(sched, str) or not sched.strip():
+        sched = None
+    return get_scheduled_amount(
+        sched, pd.Timestamp(target_date), _num(row.get("monthly_rent")), _num(row.get("monthly_maintenance_fee"))
+    )
+
+
+def build_yearly_step_ups(rent_schedule_json, start_date, end_date, default_rent, default_maint):
+    """계약 시작일부터 1년 단위로 각 연차 첫날의 월 임대료/관리비를 계산합니다 (갱신 기안서 연차별 금액용)."""
+    if not isinstance(rent_schedule_json, str) or not rent_schedule_json.strip():
+        rent_schedule_json = None
+    steps = []
+    d, end = pd.Timestamp(start_date), pd.Timestamp(end_date)
+    while d <= end and len(steps) < 20:
+        r, m = get_scheduled_amount(rent_schedule_json, d, float(default_rent or 0), float(default_maint or 0))
+        steps.append({"rent": r, "maint": m})
+        d = d + pd.DateOffset(years=1)
+    return steps
 
 
 def highlight_total_row(row):
@@ -949,7 +986,7 @@ def init_db():
 
     conn.commit()
 
-    c.execute("DROP TABLE IF EXISTS RentRoll_Overrides")
+    # 주의: 과거에는 여기서 DROP TABLE을 실행해 앱 재시작 때마다 수동 조정값이 삭제되었습니다.
     c.execute("""
         CREATE TABLE IF NOT EXISTS RentRoll_Overrides (
             contract_id INTEGER,
@@ -996,6 +1033,61 @@ def fetch_data(query, _eng=None):
     if _eng is None:
         _eng = get_engine()
     return pd.read_sql(query, _eng)
+
+# 오늘 시점에 실제 점유 중인 계약 조건.
+# 갱신 계약은 새 계약(ACTIVE)이 미래에 시작하고, 현재 기간은 기존 계약(RENEWED)이 덮고 있으므로
+# status가 ACTIVE 또는 RENEWED(또는 미지정)이면서 오늘이 계약기간에 포함된 계약을 점유로 봅니다.
+CURRENT_OCCUPANCY_SQL = (
+    "(status IN ('ACTIVE', 'RENEWED') OR status IS NULL) "
+    "AND start_date <= CURRENT_DATE AND end_date >= CURRENT_DATE"
+)
+
+
+def get_current_leases_by_floor(asset_name=None):
+    """오늘 시점 점유 계약을 층 단위로 펼쳐 반환합니다 (업체별 행 유지).
+
+    다층 계약(floor = '20,21')은 floor_details의 층별 전용면적으로 나눠 각 층에 배분합니다.
+    층별 exclusive_area가 없으면 ratio × 계약 전용면적으로 배분합니다.
+
+    반환: DataFrame[asset_name, floor, company_name, leased_area] (단위: 평, 전용면적 기준)
+    """
+    df = fetch_data(
+        "SELECT asset_name, floor, company_name, floor_details, contract_exclusive_area "
+        f"FROM Lease_Contracts WHERE {CURRENT_OCCUPANCY_SQL}"
+    )
+    if asset_name is not None:
+        df = df[df["asset_name"] == asset_name]
+    rows = []
+    for r in df.itertuples(index=False):
+        total_ex = float(r.contract_exclusive_area) if pd.notna(r.contract_exclusive_area) else 0.0
+        fd = None
+        if isinstance(r.floor_details, str) and r.floor_details.strip():
+            try:
+                fd = json.loads(r.floor_details)
+            except ValueError:
+                fd = None
+        if isinstance(fd, dict) and fd:
+            for fl, info in fd.items():
+                info = info if isinstance(info, dict) else {}
+                ex = info.get("exclusive_area")
+                if ex is None:
+                    ex = total_ex * float(info.get("ratio") or 0)
+                rows.append((r.asset_name, str(fl).strip(), r.company_name, float(ex or 0)))
+        else:
+            rows.append((r.asset_name, str(r.floor).strip(), r.company_name, total_ex))
+    return pd.DataFrame(rows, columns=["asset_name", "floor", "company_name", "leased_area"])
+
+
+def get_current_leased_area_by_floor():
+    """오늘 시점 점유 계약의 전용면적을 (자산, 층) 단위로 집계합니다. (자산별 통합 조회, 챗봇 공용)
+
+    반환: DataFrame[asset_name, floor, leased_area] (단위: 평)
+    """
+    df = get_current_leases_by_floor()
+    if df.empty:
+        return pd.DataFrame(columns=["asset_name", "floor", "leased_area"])
+    return df.groupby(["asset_name", "floor"], as_index=False)["leased_area"].sum()
+
 
 def execute_query(query, params=(), commit=True):
     """
@@ -1289,7 +1381,8 @@ def get_actual_monthly_rent_by_company(df_contracts_all, asset_name, floor, comp
 
 
 
-def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None):
+def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None, start_month=None):
+    """start_month를 생략하면 기존 화면과 동일하게 2026년은 6월부터, 그 외 연도는 1월부터 계산합니다."""
     import pandas as pd
     from datetime import datetime, timedelta
     import json
@@ -1330,7 +1423,8 @@ def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None
             currency_val = row["currency"] if "currency" in row and pd.notnull(row["currency"]) else "KRW"
             group_key = (row["asset_name"], floor_name_unified, company_clean, currency_val)
 
-            start_month = 6 if selected_year == 2026 else 1
+            if start_month is None:
+                start_month = 6 if selected_year == 2026 else 1
 
             if group_key not in records_dict:
                 records_dict[group_key] = {
@@ -1340,11 +1434,13 @@ def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None
                     "업체명": company_clean,
                     "통화": currency_val,
                     "_change_map": {},
+                    "_cids": set(),
                 }
                 for m in range(start_month, 13):
                     records_dict[group_key][f"{m}월 임대료"] = 0.0
                     records_dict[group_key][f"{m}월 관리비"] = 0.0
 
+            records_dict[group_key]["_cids"].add(row["contract_id"])
             if row["status"] == "ACTIVE":
                 records_dict[group_key]["Contract_ID"] = row["contract_id"]
             
@@ -1414,13 +1510,10 @@ def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None
                     rent_to_charge_total = 0
                     maint_to_charge_total = 0
 
-                if (row["contract_id"], floor_name_unified, month) in overrides_dict:
-                    o_rent, o_maint = overrides_dict[(row["contract_id"], floor_name_unified, month)]
-                    floor_rent = o_rent
-                    floor_maint = o_maint
-                else:
-                    floor_rent = rent_to_charge_total
-                    floor_maint = maint_to_charge_total
+                # 수동 조정값은 계약 단위가 아니라 렌트롤 행(업체·층) 단위로 아래에서 일괄 적용합니다.
+                # (계약 단위로 적용하면 갱신 전·후 계약이 함께 있는 달에 조정값이 기존 금액에 더해짐)
+                floor_rent = rent_to_charge_total
+                floor_maint = maint_to_charge_total
 
                 if currency != "KRW":
                     floor_rent = round(floor_rent, 2)
@@ -1461,6 +1554,25 @@ def generate_annual_rent_roll(selected_year, sel_assets=None, sel_companies=None
 
         except Exception as e:
             pass
+
+    # 수동 조정값 적용: 렌트롤 화면은 행의 대표 계약번호(Contract_ID)로 조정값을 저장하므로,
+    # 행에 속한 계약 중 어느 하나에 조정값이 있으면 해당 월의 행 금액을 조정값으로 '대체'합니다.
+    # (임대료 변동 추이 화면과 같은 방식)
+    for rec in records_dict.values():
+        cids = rec.pop("_cids", set())
+        months_in_rec = [int(k.split("월")[0]) for k in rec if k.endswith("월 임대료")]
+        for month in months_in_rec:
+            for cid in cids:
+                key = (cid, rec["층"], month)
+                if key in overrides_dict:
+                    o_rent, o_maint = overrides_dict[key]
+                    o_rent = float(o_rent or 0)
+                    o_maint = float(o_maint or 0)
+                    if rec["통화"] != "KRW":
+                        o_rent, o_maint = round(o_rent, 2), round(o_maint, 2)
+                    rec[f"{month}월 임대료"] = o_rent
+                    rec[f"{month}월 관리비"] = o_maint
+                    break
 
     records = list(records_dict.values())
     if records:

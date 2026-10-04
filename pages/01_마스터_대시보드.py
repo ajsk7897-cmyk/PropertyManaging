@@ -8,7 +8,11 @@ import plotly.express as px
 import numpy as np
 
 df_assets_md = fetch_data("SELECT * FROM Asset_Area")
-df_leases_md = fetch_data("SELECT * FROM Lease_Contracts WHERE status = 'ACTIVE'")
+# 갱신 계약은 새 계약(ACTIVE)이 미래에 시작하고 현재 기간은 기존 계약(RENEWED)이 덮으므로 둘 다 조회한 뒤
+# 아래에서 오늘 날짜가 계약기간에 포함된 계약만 '현재 점유'로 남깁니다.
+df_leases_md = fetch_data(
+    "SELECT * FROM Lease_Contracts WHERE status IN ('ACTIVE', 'RENEWED') OR status IS NULL"
+)
 
 if df_assets_md.empty:
     st.warning("등록된 자산 정보가 없습니다.")

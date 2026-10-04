@@ -78,6 +78,8 @@ if not df_history.empty:
         sel_hist_str = st.selectbox("다운로드할 갱신 이력 선택", renewal_opts)
         if sel_hist_str:
             hist_id = int(sel_hist_str.split("]")[0][1:])
+            new_contract_id = None
+            old_contract_id = None
             try:
                 df_hist = fetch_data(f"SELECT contract_id, details FROM Contract_History WHERE history_id = {hist_id}")
                 if not df_hist.empty:
@@ -85,110 +87,124 @@ if not df_history.empty:
                     details_str = df_hist.iloc[0]["details"]
                     details_json = json.loads(details_str) if details_str else {}
                     old_contract_id = details_json.get("이전계약ID")
-                else:
-                    old_contract_id = None
             except Exception as e:
                 st.error(f"이력 조회 중 오류 발생: {e}")
-                old_contract_id = None
 
-                if old_contract_id:
-                    new_c = fetch_data(
-                        f"SELECT * FROM Lease_Contracts WHERE contract_id = {new_contract_id}"
-                    ).iloc[0]
-                    old_c = fetch_data(
-                        f"SELECT * FROM Lease_Contracts WHERE contract_id = {old_contract_id}"
-                    ).iloc[0]
+            # 과거 버그로 이력의 계약번호가 0으로 저장된 경우, 이전 계약번호로 갱신 계약을 찾아 보완
+            if old_contract_id and not new_contract_id:
+                df_child = fetch_data(
+                    f"SELECT contract_id FROM Lease_Contracts WHERE parent_contract_id = {int(old_contract_id)} ORDER BY contract_id DESC"
+                )
+                if not df_child.empty:
+                    new_contract_id = int(df_child.iloc[0]["contract_id"])
 
-                    import proposal_generator
-                    import importlib
+            if not old_contract_id:
+                st.warning("선택하신 이력에는 이전 계약 정보가 포함되어 있지 않습니다.")
+            elif not new_contract_id:
+                st.warning("선택하신 이력의 갱신 계약을 찾을 수 없습니다. (삭제된 계약일 수 있습니다)")
+            else:
+                try:
+                    df_new = fetch_data(f"SELECT * FROM Lease_Contracts WHERE contract_id = {new_contract_id}")
+                    df_old = fetch_data(f"SELECT * FROM Lease_Contracts WHERE contract_id = {int(old_contract_id)}")
+                    if df_new.empty or df_old.empty:
+                        st.warning("기안서에 필요한 기존/갱신 계약 중 하나가 삭제되어 기안서를 만들 수 없습니다.")
+                    else:
+                        new_c = df_new.iloc[0]
+                        old_c = df_old.iloc[0]
 
-                    importlib.reload(proposal_generator)
-                    from proposal_generator import generate_renewal_proposal
+                        import proposal_generator
+                        import importlib
 
-                    old_data = {
-                        "기존_총임대면적_평": old_c["contract_area"],
-                        "기존_전용면적_평": old_c.get("contract_exclusive_area", 0),
-                        "기존_월임대료": old_c["monthly_rent"],
-                        "기존_월관리비": old_c["monthly_maintenance_fee"],
-                        "기존_보증금": old_c["deposit"],
-                        "기존_임대차기간": f"{old_c['start_date']} ~ {old_c['end_date']}",
-                    }
-                    new_data = {
-                        "자산주소": new_c["asset_name"],
-                        "GPMS_ID": f"C-{old_contract_id}",
-                        "임차인명": new_c["company_name"],
-                        "부동산사용목적": "업무시설",
-                        "대리인명": "",
-                        "임대층": new_c["floor"],
-                        "신규_총임대면적_평": new_c["contract_area"],
-                        "신규_전용면적_평": new_c.get("contract_exclusive_area", 0),
-                        "갱신_보증금": new_c["deposit"],
-                        "갱신_월임대료": new_c["monthly_rent"],
-                        "갱신_월관리비": new_c["monthly_maintenance_fee"],
-                        "갱신_임대차기간": f"{new_c['start_date']} ~ {new_c['end_date']}",
-                        "갱신_임대시작일": new_c["start_date"],
-                        "갱신_임대만료일": new_c["end_date"],
-                        "보증금비고": new_c["remarks"] if new_c["remarks"] else "",
-                        "임대료비고": "",
-                        "관리비비고": "",
-                        "기간비고": "",
-                    }
+                        importlib.reload(proposal_generator)
+                        from proposal_generator import generate_renewal_proposal
 
-                    df_comps = fetch_data(
-                        f"SELECT floor, contract_area, deposit, monthly_rent, monthly_maintenance_fee FROM Lease_Contracts WHERE asset_name = '{new_c['asset_name']}' AND status = 'ACTIVE' AND contract_id != {new_contract_id}"
-                    )
-                    comps_data = [
-                        {
-                            "floor": row["floor"],
-                            "contract_area": row["contract_area"],
-                            "deposit": row["deposit"],
-                            "monthly_rent": row["monthly_rent"],
-                            "monthly_maintenance_fee": row["monthly_maintenance_fee"],
+                        # 기존 조건은 최초 계약 금액이 아니라 갱신 직전(기존 계약 종료일) 기준 실제 금액
+                        old_rent_now, old_maint_now = get_contract_amount_at(old_c, old_c["end_date"])
+                        old_data = {
+                            "기존_총임대면적_평": old_c["contract_area"],
+                            "기존_전용면적_평": old_c.get("contract_exclusive_area", 0),
+                            "기존_월임대료": old_rent_now,
+                            "기존_월관리비": old_maint_now,
+                            "기존_보증금": old_c["deposit"],
+                            "기존_임대차기간": f"{old_c['start_date']} ~ {old_c['end_date']}",
                         }
-                        for _, row in df_comps.iterrows()
-                    ]
+                        new_data = {
+                            "자산주소": new_c["asset_name"],
+                            "GPMS_ID": f"C-{old_contract_id}",
+                            "임차인명": new_c["company_name"],
+                            "부동산사용목적": "업무시설",
+                            "대리인명": "",
+                            "임대층": new_c["floor"],
+                            "신규_총임대면적_평": new_c["contract_area"],
+                            "신규_전용면적_평": new_c.get("contract_exclusive_area", 0),
+                            "갱신_보증금": new_c["deposit"],
+                            "갱신_월임대료": new_c["monthly_rent"],
+                            "갱신_월관리비": new_c["monthly_maintenance_fee"],
+                            "갱신_임대차기간": f"{new_c['start_date']} ~ {new_c['end_date']}",
+                            "갱신_임대시작일": str(new_c["start_date"]),
+                            "갱신_임대만료일": str(new_c["end_date"]),
+                            "보증금비고": new_c["remarks"] if new_c["remarks"] else "",
+                            "임대료비고": "",
+                            "관리비비고": "",
+                            "기간비고": "",
+                            # 연차별 금액: 갱신 계약의 기간별 스케줄 반영
+                            "step_ups": build_yearly_step_ups(
+                                new_c.get("rent_schedule"), new_c["start_date"], new_c["end_date"],
+                                new_c["monthly_rent"], new_c["monthly_maintenance_fee"],
+                            ),
+                        }
 
-                    file_bytes, filename = generate_renewal_proposal(
-                        old_data, new_data, comps_data
-                    )
-                        
-                    col_dl1, col_dl2, col_dl3 = st.columns([4, 4, 2])
-                    with col_dl1:
-                        st.download_button(
-                            "📥 선택한 이력 기안파일 다운로드",
-                            data=file_bytes,
-                            file_name=filename,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True,
+                        df_comps = fetch_data(
+                            f"SELECT floor, contract_area, deposit, monthly_rent, monthly_maintenance_fee FROM Lease_Contracts WHERE asset_name = '{new_c['asset_name']}' AND status = 'ACTIVE' AND contract_id != {new_contract_id}"
                         )
-                            
-                    with col_dl2:
-                        to_email_6 = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key=f"email_tab6_{hist_id}")
-                            
-                    with col_dl3:
-                        if st.button("🚀 메일 발송", key=f"btn_email_tab6_{hist_id}", use_container_width=True):
-                            if to_email_6:
-                                company_name = new_data.get('임차인명', '업체')
-                                success, err = send_email_with_attachment(
-                                    to_email=to_email_6,
-                                    subject=f"[PM/AM] {company_name} 갱신 기안서류",
-                                    body=f"요청하신 {company_name}의 갱신 기안서류(Excel)를 첨부하여 보내드립니다.",
-                                    file_bytes=file_bytes,
-                                    file_name=filename,
-                                    mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                )
-                                if success:
-                                    st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
+                        comps_data = [
+                            {
+                                "floor": row["floor"],
+                                "contract_area": row["contract_area"],
+                                "deposit": row["deposit"],
+                                "monthly_rent": row["monthly_rent"],
+                                "monthly_maintenance_fee": row["monthly_maintenance_fee"],
+                            }
+                            for _, row in df_comps.iterrows()
+                        ]
+
+                        file_bytes, filename = generate_renewal_proposal(
+                            old_data, new_data, comps_data
+                        )
+
+                        col_dl1, col_dl2, col_dl3 = st.columns([4, 4, 2])
+                        with col_dl1:
+                            st.download_button(
+                                "📥 선택한 이력 기안파일 다운로드",
+                                data=file_bytes,
+                                file_name=filename,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                            )
+
+                        with col_dl2:
+                            to_email_6 = st.text_input("이메일", label_visibility="collapsed", placeholder="수신자 이메일 주소 입력", key=f"email_tab6_{hist_id}")
+
+                        with col_dl3:
+                            if st.button("🚀 메일 발송", key=f"btn_email_tab6_{hist_id}", use_container_width=True):
+                                if to_email_6:
+                                    company_name = new_data.get('임차인명', '업체')
+                                    success, err = send_email_with_attachment(
+                                        to_email=to_email_6,
+                                        subject=f"[PM/AM] {company_name} 갱신 기안서류",
+                                        body=f"요청하신 {company_name}의 갱신 기안서류(Excel)를 첨부하여 보내드립니다.",
+                                        file_bytes=file_bytes,
+                                        file_name=filename,
+                                        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    )
+                                    if success:
+                                        st.toast("메일이 성공적으로 발송되었습니다!", icon="✅")
+                                    else:
+                                        st.error(f"메일 발송 실패: {err}")
                                 else:
-                                    st.error(f"메일 발송 실패: {err}")
-                            else:
-                                st.warning("이메일 주소를 입력해주세요.")
-                else:
-                    st.warning(
-                        "선택하신 이력에는 이전 계약 정보가 포함되어 있지 않습니다."
-                    )
-            except Exception as e:
-                st.error(f"파일 생성 오류: {e}")
+                                    st.warning("이메일 주소를 입력해주세요.")
+                except Exception as e:
+                    st.error(f"파일 생성 오류: {e}")
 else:
     st.info("아직 등록된 업데이트 이력이 없습니다.")
 

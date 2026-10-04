@@ -37,10 +37,8 @@ if sp_asset:
         _eng=engine
     )
         
-    df_leases_sp = fetch_data(
-        f"SELECT floor, company_name, contract_area FROM Lease_Contracts WHERE asset_name = '{sp_asset}' AND status = 'ACTIVE' AND start_date <= '{today_str}' AND end_date >= '{today_str}'",
-        _eng=engine
-    )
+    # 오늘 시점 점유 계약 (갱신 전 계약 포함, 다층 계약은 층별 배분, 층 전용면적과 같은 전용면적 기준)
+    df_leases_sp = get_current_leases_by_floor(sp_asset).rename(columns={"leased_area": "contract_area"})
 
     # Sort floors dynamically
     def floor_sort_key(f):

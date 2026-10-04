@@ -18,21 +18,10 @@ if not df_asset.empty:
     if selected_assets:
         df_asset = df_asset[df_asset["asset_name"].isin(selected_assets)]
 
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    # 현재 활성화된 계약 면적 산출
-    df_leases = fetch_data(
-        f"SELECT asset_name, floor, contract_exclusive_area FROM Lease_Contracts WHERE start_date <= '{today_str}' AND end_date >= '{today_str}' AND status = 'ACTIVE'"
-    )
+    # 오늘 시점 점유 면적 산출 (갱신 전 계약 포함, 다층 계약은 층별 배분)
+    leased_area_df = get_current_leased_area_by_floor()
 
-    if not df_leases.empty:
-        leased_area_df = (
-            df_leases.groupby(["asset_name", "floor"])["contract_exclusive_area"]
-            .sum()
-            .reset_index()
-        )
-        leased_area_df.rename(
-            columns={"contract_exclusive_area": "leased_area"}, inplace=True
-        )
+    if not leased_area_df.empty:
         display_df = pd.merge(
             df_asset, leased_area_df, on=["asset_name", "floor"], how="left"
         )

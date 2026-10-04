@@ -39,6 +39,22 @@ if not df_asset.empty:
         - display_df["bank_area"].fillna(0.0)
         - display_df["leased_area"].fillna(0.0)
     )
+    # 입주 예정 면적: 계약은 체결됐지만 아직 입주 전인 신규 임차 (기존 임차인 갱신 제외)
+    # 모집가능 공실 = 공실면적 - 입주예정 면적. 중개사에 안내할 실제 모집 대상입니다.
+    upcoming_df = get_upcoming_new_leases_by_floor()
+    if not upcoming_df.empty:
+        reserved_df = (
+            upcoming_df.groupby(["asset_name", "floor"], as_index=False)["leased_area"].sum()
+            .rename(columns={"leased_area": "reserved_area"})
+        )
+        display_df = display_df.merge(reserved_df, on=["asset_name", "floor"], how="left")
+    else:
+        display_df["reserved_area"] = 0.0
+    display_df["reserved_area"] = display_df["reserved_area"].fillna(0.0)
+    _vacant_pos = display_df["vacant_area"].clip(lower=0)
+    display_df["reserved_area"] = display_df["reserved_area"].clip(upper=_vacant_pos)
+    display_df["marketable_area"] = (_vacant_pos - display_df["reserved_area"]).clip(lower=0)
+
     display_df["occupancy_rate (%)"] = (
         (
             display_df["leased_area"]
@@ -61,6 +77,8 @@ if not df_asset.empty:
                 "bank_area": "sum",
                 "leased_area": "sum",
                 "vacant_area": "sum",
+                "reserved_area": "sum",
+                "marketable_area": "sum",
             }
         )
         .reset_index()
@@ -87,6 +105,8 @@ if not df_asset.empty:
                 "bank_area": dashboard_df["bank_area"].sum(),
                 "leased_area": dashboard_df["leased_area"].sum(),
                 "vacant_area": dashboard_df["vacant_area"].sum(),
+                "reserved_area": dashboard_df["reserved_area"].sum(),
+                "marketable_area": dashboard_df["marketable_area"].sum(),
             }
         ]
     )
@@ -114,6 +134,8 @@ if not df_asset.empty:
                     "bank_area": display_df["bank_area"].sum(),
                     "leased_area": display_df["leased_area"].sum(),
                     "vacant_area": display_df["vacant_area"].sum(),
+                    "reserved_area": display_df["reserved_area"].sum(),
+                    "marketable_area": display_df["marketable_area"].sum(),
                 }
             ]
         )
@@ -145,6 +167,8 @@ if not df_asset.empty:
             "exclusive_area": "전용면적",
             "leased_area": "테넌트 면적",
             "vacant_area": "공실면적",
+            "reserved_area": "입주예정 면적",
+            "marketable_area": "모집가능 공실",
             "occupancy_rate (%)": "임대율 (%)",
         },
         inplace=True,
@@ -158,6 +182,8 @@ if not df_asset.empty:
         "은행 및 지점 사용 면적",
         "테넌트 면적",
         "공실면적",
+        "입주예정 면적",
+        "모집가능 공실",
         "임대율 (%)",
     ]
     dashboard_df_conv = dashboard_df_conv[dashboard_order]
@@ -169,6 +195,8 @@ if not df_asset.empty:
         "은행 및 지점 사용 면적",
         "테넌트 면적",
         "공실면적",
+        "입주예정 면적",
+        "모집가능 공실",
     ]
 
     if unit_option == "㎡":
@@ -235,6 +263,8 @@ if not df_asset.empty:
             "exclusive_area": "전용면적",
             "leased_area": "테넌트 면적",
             "vacant_area": "공실면적",
+            "reserved_area": "입주예정 면적",
+            "marketable_area": "모집가능 공실",
             "occupancy_rate (%)": "임대율 (%)",
         },
         inplace=True,
@@ -250,6 +280,8 @@ if not df_asset.empty:
         "은행 및 지점 사용 면적",
         "테넌트 면적",
         "공실면적",
+        "입주예정 면적",
+        "모집가능 공실",
         "임대율 (%)",
     ]
     display_df_conv = display_df_conv[desired_order]
@@ -261,6 +293,8 @@ if not df_asset.empty:
         "은행 및 지점 사용 면적",
         "테넌트 면적",
         "공실면적",
+        "입주예정 면적",
+        "모집가능 공실",
     ]
 
     if unit_option == "㎡":

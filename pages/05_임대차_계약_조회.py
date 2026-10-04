@@ -37,23 +37,13 @@ if not df_contracts.empty:
             df_contracts["company_name"].isin(sel_companies)
         ]
 
+    # 실질(유효) 임대료: 계약 전체 기간 평균 월 임대료 (렌트프리 월 0, 기간별 인상 스케줄·일할 반영, 계약 통화 기준)
+    # 챗봇의 유효 임대료/NOC 계산과 같은 공용 함수를 사용합니다.
     def calc_effective_rent(row):
-        try:
-            start = pd.to_datetime(row["start_date"])
-            end = pd.to_datetime(row["end_date"])
+        econ = calc_lease_economics(row)
+        return econ["eff_rent_avg"] if econ else 0
 
-            total_days = (end - start).days + 1
-            total_months = total_days / 365 * 12
-
-            if total_months <= 0:
-                return 0
-            rent = float(row["monthly_rent"])
-            rf_months = float(row["total_rent_free_months"])
-            return ((rent * total_months) - (rent * rf_months)) / total_months
-        except:
-            return 0
-
-    df_contracts["effective_rent"] = df_contracts.apply(calc_effective_rent, axis=1)
+    df_contracts["effective_rent"] = [calc_effective_rent(r) for r in df_contracts.to_dict("records")]
 
     df_contracts["deposit_per_pyeong"] = (
         df_contracts["deposit"]

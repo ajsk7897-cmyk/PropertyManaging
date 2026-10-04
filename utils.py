@@ -1043,11 +1043,39 @@ CURRENT_OCCUPANCY_SQL = (
 )
 
 
-def get_current_leases_by_floor(asset_name=None):
-    """오늘 시점 점유 계약을 층 단위로 펼쳐 반환합니다 (업체별 행 유지).
+def _expand_lease_floors(df, extra_cols=()):
+    """계약 행을 층 단위로 펼칩니다.
 
     다층 계약(floor = '20,21')은 floor_details의 층별 전용면적으로 나눠 각 층에 배분합니다.
     층별 exclusive_area가 없으면 ratio × 계약 전용면적으로 배분합니다.
+    """
+    cols = ["asset_name", "floor", "company_name", "leased_area", *extra_cols]
+    rows = []
+    for r in df.to_dict("records"):
+        ex_total = r.get("contract_exclusive_area")
+        total_ex = float(ex_total) if ex_total is not None and pd.notna(ex_total) else 0.0
+        extras = [r.get(c) for c in extra_cols]
+        fd = None
+        fd_raw = r.get("floor_details")
+        if isinstance(fd_raw, str) and fd_raw.strip():
+            try:
+                fd = json.loads(fd_raw)
+            except ValueError:
+                fd = None
+        if isinstance(fd, dict) and fd:
+            for fl, info in fd.items():
+                info = info if isinstance(info, dict) else {}
+                ex = info.get("exclusive_area")
+                if ex is None:
+                    ex = total_ex * float(info.get("ratio") or 0)
+                rows.append([r["asset_name"], str(fl).strip(), r["company_name"], float(ex or 0), *extras])
+        else:
+            rows.append([r["asset_name"], str(r["floor"]).strip(), r["company_name"], total_ex, *extras])
+    return pd.DataFrame(rows, columns=cols)
+
+
+def get_current_leases_by_floor(asset_name=None):
+    """오늘 시점 점유 계약을 층 단위로 펼쳐 반환합니다 (업체별 행 유지).
 
     반환: DataFrame[asset_name, floor, company_name, leased_area] (단위: 평, 전용면적 기준)
     """
@@ -1057,25 +1085,7 @@ def get_current_leases_by_floor(asset_name=None):
     )
     if asset_name is not None:
         df = df[df["asset_name"] == asset_name]
-    rows = []
-    for r in df.itertuples(index=False):
-        total_ex = float(r.contract_exclusive_area) if pd.notna(r.contract_exclusive_area) else 0.0
-        fd = None
-        if isinstance(r.floor_details, str) and r.floor_details.strip():
-            try:
-                fd = json.loads(r.floor_details)
-            except ValueError:
-                fd = None
-        if isinstance(fd, dict) and fd:
-            for fl, info in fd.items():
-                info = info if isinstance(info, dict) else {}
-                ex = info.get("exclusive_area")
-                if ex is None:
-                    ex = total_ex * float(info.get("ratio") or 0)
-                rows.append((r.asset_name, str(fl).strip(), r.company_name, float(ex or 0)))
-        else:
-            rows.append((r.asset_name, str(r.floor).strip(), r.company_name, total_ex))
-    return pd.DataFrame(rows, columns=["asset_name", "floor", "company_name", "leased_area"])
+    return _expand_lease_floors(df)
 
 
 def get_current_leased_area_by_floor():
@@ -1087,6 +1097,183 @@ def get_current_leased_area_by_floor():
     if df.empty:
         return pd.DataFrame(columns=["asset_name", "floor", "leased_area"])
     return df.groupby(["asset_name", "floor"], as_index=False)["leased_area"].sum()
+
+
+def get_upcoming_new_leases_by_floor():
+    """계약은 체결됐지만 아직 입주 전인 '신규' 임차를 층 단위로 반환합니다 (모집 가능 공실 계산용).
+
+    기존 임차인의 갱신 계약은 제외합니다. 갱신 계약은 현재 점유가 그대로 이어지므로 공실과 무관합니다.
+    - 갱신 판단: parent_contract_id가 있거나, 같은 자산에서 같은 업체가 현재 점유 중인 경우
+
+    반환: DataFrame[asset_name, floor, company_name, leased_area, start_date] (단위: 평, 전용면적 기준)
+    """
+    df = fetch_data(
+        "SELECT asset_name, floor, company_name, floor_details, contract_exclusive_area, start_date, parent_contract_id "
+        "FROM Lease_Contracts WHERE (status = 'ACTIVE' OR status IS NULL) AND start_date > CURRENT_DATE"
+    )
+    if df.empty:
+        return pd.DataFrame(columns=["asset_name", "floor", "company_name", "leased_area", "start_date"])
+    occ = fetch_data(f"SELECT asset_name, company_name FROM Lease_Contracts WHERE {CURRENT_OCCUPANCY_SQL}")
+    occupying = set(zip(occ["asset_name"], occ["company_name"]))
+    is_renewal = df["parent_contract_id"].notna() | pd.Series(
+        [(a, c) in occupying for a, c in zip(df["asset_name"], df["company_name"])], index=df.index
+    )
+    return _expand_lease_floors(df[~is_renewal], extra_cols=("start_date",))
+
+
+def get_floor_vacancy(asset_names=None):
+    """층별 공실 현황 (오늘 기준, 전용면적, 단위: 평).
+
+    - 임대가능면적 = 전용면적 - 은행 사용면적
+    - 물리적 공실 = 임대가능면적 - 현재 점유 면적 (0 미만은 0)
+    - 입주예정 면적 = 계약 체결 후 입주 전인 신규 임차 면적 (물리적 공실을 넘지 않게 제한)
+    - 모집 가능 공실 = 물리적 공실 - 입주예정 면적. 중개사에 안내할 실제 모집 대상입니다.
+
+    반환: DataFrame[asset_name, floor, exclusive_area, total_area, bank_area, rentable,
+                    leased, vacant, reserved, marketable]
+    """
+    df_area = fetch_data("SELECT asset_name, floor, exclusive_area, total_area, bank_area FROM Asset_Area").copy()
+    if asset_names:
+        df_area = df_area[df_area["asset_name"].isin(asset_names)]
+    leased = get_current_leased_area_by_floor().rename(columns={"leased_area": "leased"})
+    up = get_upcoming_new_leases_by_floor()
+    if up.empty:
+        reserved = pd.DataFrame(columns=["asset_name", "floor", "reserved"])
+    else:
+        reserved = (
+            up.groupby(["asset_name", "floor"], as_index=False)["leased_area"].sum()
+            .rename(columns={"leased_area": "reserved"})
+        )
+    df = (
+        df_area.merge(leased, on=["asset_name", "floor"], how="left")
+        .merge(reserved, on=["asset_name", "floor"], how="left")
+    )
+    for c in ("leased", "reserved", "bank_area", "exclusive_area", "total_area"):
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+    df["rentable"] = (df["exclusive_area"] - df["bank_area"]).clip(lower=0)
+    df["vacant"] = (df["rentable"] - df["leased"]).clip(lower=0)
+    df["reserved"] = df[["reserved", "vacant"]].min(axis=1)
+    df["marketable"] = (df["vacant"] - df["reserved"]).clip(lower=0)
+    return df
+
+
+# 임대 경제성 가정값
+LEASE_ASSUMPTIONS = {
+    # 보증금 운용이율(연). NOC 계산 시 보증금을 월 비용으로 환산하는 데 사용합니다.
+    "DEPOSIT_YIELD": 0.03,
+}
+
+
+def calc_lease_economics(row, as_of=None):
+    """계약 1건의 임대 경제성을 계산합니다 (계약 통화 기준, 월 금액).
+
+    계약 전체 기간을 월 단위로 돌며 기간별 스케줄(인상), 일할(중도 입퇴점), 렌트프리를 반영합니다.
+    - face_rent_avg: 계약기간 평균 표면 임대료 (렌트프리 무시)
+    - eff_rent_avg : 계약기간 평균 유효 임대료 (렌트프리 월은 0) = Effective Rent
+    - maint_avg    : 계약기간 평균 관리비
+    - current_rent / current_maint: 기준일(as_of) 시점의 스케줄상 금액
+    - rf_months    : 계약기간 내 렌트프리 개월 수
+    - term_months  : 계약기간(개월, 일할 반영)
+    계약 기간이 없거나 종료일이 시작일보다 빠르면 None을 반환합니다.
+    """
+    def _num(v):
+        try:
+            return float(v) if v is not None and pd.notna(v) else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    start, end = pd.to_datetime(row.get("start_date")), pd.to_datetime(row.get("end_date"))
+    if pd.isna(start) or pd.isna(end) or end < start:
+        return None
+    base_rent, base_maint = _num(row.get("monthly_rent")), _num(row.get("monthly_maintenance_fee"))
+
+    rf_raw = row.get("rent_free_details")
+    try:
+        rf = set(json.loads(rf_raw)) if isinstance(rf_raw, str) and rf_raw.strip() else set()
+    except ValueError:
+        rf = set()
+
+    sched_raw = row.get("rent_schedule")
+    periods = []
+    for p in _parse_rent_schedule(sched_raw if isinstance(sched_raw, str) else None):
+        s_dt = pd.to_datetime(p.get("start_date"), errors="coerce")
+        e_dt = pd.to_datetime(p.get("end_date"), errors="coerce")
+        if pd.notna(s_dt) and pd.notna(e_dt):
+            periods.append((s_dt, e_dt, _num(p.get("rent")), _num(p.get("maint"))))
+
+    def amount_at(d):
+        # get_scheduled_amount와 같은 규칙: 해당 구간 금액, 없으면 직전 종료 구간 금액, 그 전이면 최초 금액
+        last = (base_rent, base_maint)
+        for s_dt, e_dt, r, m in periods:
+            if s_dt <= d <= e_dt:
+                return r, m
+            if d > e_dt:
+                last = (r, m)
+        return last
+
+    face = eff = maint = weight = 0.0
+    rf_used = 0
+    m_start = pd.Timestamp(start.year, start.month, 1)
+    while m_start <= end:
+        m_end = m_start + pd.offsets.MonthEnd(0)
+        o_s, o_e = max(start, m_start), min(end, m_end)
+        if o_s <= o_e:
+            f = ((o_e - o_s).days + 1) / m_end.day
+            r, mt = amount_at(o_s)
+            face += r * f
+            maint += mt * f
+            weight += f
+            if m_start.strftime("%Y-%m") in rf:
+                rf_used += 1
+            else:
+                eff += r * f
+        m_start = m_start + pd.offsets.MonthBegin(1)
+    if weight <= 0:
+        return None
+
+    as_of = pd.Timestamp(as_of or datetime.now().date())
+    cur_rent, cur_maint = amount_at(min(max(as_of, start), end))
+    return {
+        "term_months": weight,
+        "face_rent_avg": face / weight,
+        "eff_rent_avg": eff / weight,
+        "maint_avg": maint / weight,
+        "current_rent": cur_rent,
+        "current_maint": cur_maint,
+        "rf_months": rf_used,
+    }
+
+
+def calc_lease_economics_table(df_contracts, deposit_yield=None, as_of=None):
+    """계약 목록의 경제성 지표를 원화로 환산해 계약별 표로 반환합니다.
+
+    추가 컬럼(원화, 월 기준): current_rent_krw, face_rent_krw, eff_rent_krw, maint_krw, deposit_monthly_krw,
+    occupancy_cost_krw(= 유효 임대료 + 관리비 + 보증금 월 환산), rf_months, term_months
+    NOC(평당) = occupancy_cost_krw 합 / 계약면적(전체면적) 합 (사내 기준: 전체면적 기준)
+    """
+    if deposit_yield is None:
+        deposit_yield = LEASE_ASSUMPTIONS["DEPOSIT_YIELD"]
+    out = []
+    for r in df_contracts.to_dict("records"):
+        econ = calc_lease_economics(r, as_of=as_of)
+        if econ is None:
+            continue
+        fx = CURRENCY_RATES["USD_TO_KRW"] if str(r.get("currency") or "KRW").upper() == "USD" else 1.0
+        dep = r.get("deposit")
+        dep = float(dep) if dep is not None and pd.notna(dep) else 0.0
+        rec = dict(r)
+        rec.update({
+            "current_rent_krw": econ["current_rent"] * fx,
+            "face_rent_krw": econ["face_rent_avg"] * fx,
+            "eff_rent_krw": econ["eff_rent_avg"] * fx,
+            "maint_krw": econ["maint_avg"] * fx,
+            "deposit_monthly_krw": dep * fx * deposit_yield / 12,
+            "rf_months": econ["rf_months"],
+            "term_months": econ["term_months"],
+        })
+        rec["occupancy_cost_krw"] = rec["eff_rent_krw"] + rec["maint_krw"] + rec["deposit_monthly_krw"]
+        out.append(rec)
+    return pd.DataFrame(out)
 
 
 def execute_query(query, params=(), commit=True):

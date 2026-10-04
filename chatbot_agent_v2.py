@@ -23,11 +23,15 @@ from sqlalchemy import bindparam, text
 
 from utils import (
     CURRENCY_RATES,
+    CURRENT_OCCUPANCY_SQL,
+    LEASE_ASSUMPTIONS,
+    calc_lease_economics_table,
     fetch_data,
     generate_annual_rent_roll,
     get_actual_monthly_rent_by_company,
-    get_current_leased_area_by_floor,
     get_engine,
+    get_floor_vacancy,
+    get_upcoming_new_leases_by_floor,
 )
 
 MODEL_NAME = "gemini-3.5-flash"
@@ -398,10 +402,13 @@ def get_contract_details(company_name: str, include_inactive: bool = False) -> s
 
 
 def get_vacancy_status(asset_name: str = "") -> str:
-    """오늘 기준 자산별 공실 면적, 공실률(%)과 공실이 있는 층을 계산합니다.
+    """오늘 기준 공실 현황을 계산합니다: 물리적 공실, 입주 예정(계약 완료) 면적, 모집 가능 공실과 각각의 비율.
 
-    앱의 '자산별 통합 조회' 화면과 같은 기준입니다.
-    임대가능면적 = 전용면적 - 은행 사용면적, 공실 = 임대가능면적 - 유효 계약 전용면적. 단위는 평.
+    '자산별 통합 조회' 화면과 같은 기준이며 단위는 평(전용면적)입니다.
+    - 물리적 공실 = 임대가능면적(전용 - 은행 사용) - 현재 점유 면적
+    - 입주 예정 = 계약은 체결됐지만 아직 입주 전인 신규 임차 면적 (기존 임차인의 갱신 계약은 제외)
+    - 모집 가능 공실 = 물리적 공실 - 입주 예정. 중개사에 안내할 실제 모집 대상입니다.
+    '공실 몇 평 남았어', '모집 가능한 공실', '중개사에 안내할 공실' 같은 질문에 사용하세요.
 
     Args:
         asset_name: 자산명(한글 별칭 가능). 비우면 전체 자산을 자산별로 요약.
@@ -410,51 +417,56 @@ def get_vacancy_status(asset_name: str = "") -> str:
         assets = resolve_assets(asset_name)
         if assets == []:
             return _asset_not_found(asset_name)
-
-        df_area = fetch_data("SELECT asset_name, floor, exclusive_area, total_area, bank_area FROM asset_area")
-        # '자산별 통합 조회' 화면과 같은 함수로 점유 면적을 계산합니다(갱신 전 계약 포함, 다층 계약 층별 배분).
-        leased = get_current_leased_area_by_floor().rename(columns={"leased_area": "leased"})
-        if assets:
-            df_area = df_area[df_area["asset_name"].isin(assets)]
-            leased = leased[leased["asset_name"].isin(assets)]
-        if df_area.empty:
+        df = get_floor_vacancy(assets)
+        df = df[df["rentable"] > 0]
+        if df.empty:
             return "해당 자산의 면적 정보가 없습니다."
 
-        df = df_area.merge(leased, on=["asset_name", "floor"], how="left")
-        df["leased"] = df["leased"].fillna(0.0)
-        df["rentable"] = (df["exclusive_area"].fillna(0) - df["bank_area"].fillna(0)).clip(lower=0)
-        df["vacant"] = (df["rentable"] - df["leased"]).clip(lower=0)
-        df = df[df["rentable"] > 0]
-
-        total_rentable = df["rentable"].sum()
-        total_vacant = df["vacant"].sum()
-        rate = total_vacant / total_rentable * 100 if total_rentable else 0
+        rentable = df["rentable"].sum()
+        vacant = df["vacant"].sum()
+        reserved = df["reserved"].sum()
+        marketable = df["marketable"].sum()
+        pct = lambda x: (x / rentable * 100) if rentable else 0.0
 
         label = ", ".join(assets) if assets else "전체 자산"
         res = [
             f"[{label} 공실 현황 (오늘 {date.today():%Y-%m-%d} 기준, 전용면적 기준, 단위: 평)]",
-            f"- 임대가능면적: {total_rentable:,.2f}평",
-            f"- 임대면적: {total_rentable - total_vacant:,.2f}평",
-            f"- 공실면적: {total_vacant:,.2f}평",
-            f"- 공실률: {rate:.1f}%",
+            f"- 임대가능면적: {rentable:,.2f}평",
+            f"- 현재 임대면적: {rentable - vacant:,.2f}평",
+            f"- 물리적 공실: {vacant:,.2f}평 (공실률 {pct(vacant):.1f}%)",
+            f"- 입주 예정(계약 완료, 미입주): {reserved:,.2f}평",
+            f"- 모집 가능 공실: {marketable:,.2f}평 (모집 가능 공실률 {pct(marketable):.1f}%)",
         ]
 
         if not assets:
-            by_asset = df.groupby("asset_name", as_index=False)[["rentable", "vacant"]].sum()
-            by_asset["공실률(%)"] = (by_asset["vacant"] / by_asset["rentable"] * 100).round(1)
-            by_asset = by_asset.rename(columns={"asset_name": "자산", "rentable": "임대가능(평)", "vacant": "공실(평)"})
-            res.append("\n[자산별 공실]\n" + _df_to_text(by_asset.sort_values("공실률(%)", ascending=False)))
+            g = df.groupby("asset_name", as_index=False)[["rentable", "vacant", "reserved", "marketable"]].sum()
+            g["공실률(%)"] = (g["vacant"] / g["rentable"] * 100).round(1)
+            g["모집가능 공실률(%)"] = (g["marketable"] / g["rentable"] * 100).round(1)
+            g = g.rename(columns={"asset_name": "자산", "rentable": "임대가능(평)", "vacant": "물리적 공실(평)",
+                                  "reserved": "입주예정(평)", "marketable": "모집가능 공실(평)"})
+            res.append("\n[자산별 공실]\n" + _df_to_text(g.sort_values("공실률(%)", ascending=False)))
         else:
             vac = df[df["vacant"] > 0.5].copy()
             if vac.empty:
                 res.append("- 공실이 있는 층이 없습니다.")
             else:
-                vac["상태"] = vac.apply(lambda r: "완전 공실" if r["leased"] <= 0.01 else "부분 공실", axis=1)
+                vac["상태"] = [
+                    "완전 공실" if l <= 0.01 else "부분 공실" for l in vac["leased"]
+                ]
                 vac = vac.rename(columns={"asset_name": "자산", "floor": "층", "rentable": "임대가능(평)",
-                                          "leased": "임대(평)", "vacant": "공실(평)"})
-                res.append("\n[공실이 있는 층]\n" + _df_to_text(
-                    vac[["자산", "층", "임대가능(평)", "임대(평)", "공실(평)", "상태"]]
-                ))
+                                          "leased": "임대(평)", "vacant": "물리적 공실(평)",
+                                          "reserved": "입주예정(평)", "marketable": "모집가능 공실(평)"})
+                res.append("\n[공실이 있는 층]\n" + _df_to_text(vac[[
+                    "자산", "층", "임대가능(평)", "임대(평)", "물리적 공실(평)", "입주예정(평)", "모집가능 공실(평)", "상태"
+                ]]))
+
+        up = get_upcoming_new_leases_by_floor()
+        if assets:
+            up = up[up["asset_name"].isin(assets)]
+        if not up.empty:
+            up = up.rename(columns={"asset_name": "자산", "floor": "층", "company_name": "입주 예정 업체",
+                                    "leased_area": "전용면적(평)", "start_date": "입주(계약 시작)일"})
+            res.append("\n[입주 예정 신규 계약]\n" + _df_to_text(up.sort_values("입주(계약 시작)일")))
         return "\n".join(res)
     except Exception as e:
         return f"공실 계산 중 오류가 발생했습니다: {e}"
@@ -624,21 +636,46 @@ def get_deposit_return_schedule(months_ahead: int = 3, asset_name: str = "") -> 
         return f"보증금 일정 조회 중 오류가 발생했습니다: {e}"
 
 
-def get_rent_per_pyung(entity_name: str = "", entity_type: str = "asset") -> str:
-    """유효 계약 기준 평당 임대료, 평당 관리비, 평당 총비용(NOC)을 계산합니다. 계약면적(평) 기준 면적가중 평균입니다.
+def _unit_metrics(g: pd.DataFrame) -> dict:
+    """계약 묶음의 평당 지표 (면적가중). 면적이 0인 계약(전광판 등)은 해당 지표 계산에서 제외."""
+    ga = g[g["contract_area"] > 0]
+    ge = g[g["contract_exclusive_area"] > 0]
+    ca, ea = ga["contract_area"].sum(), ge["contract_exclusive_area"].sum()
+    face = ga["face_rent_krw"].sum()
+    eff = ga["eff_rent_krw"].sum()
+    return {
+        "계약수": len(g),
+        "계약면적(평)": round(ca, 2),
+        "전용면적(평)": round(ea, 2),
+        "평당 현재 임대료": round(ga["current_rent_krw"].sum() / ca) if ca else None,
+        "평당 유효 임대료": round(eff / ca) if ca else None,
+        "렌트프리 할인율(%)": round((1 - eff / face) * 100, 1) if face else None,
+        "평당 관리비": round(ga["maint_krw"].sum() / ca) if ca else None,
+        "NOC(평당)": round(ga["occupancy_cost_krw"].sum() / ca) if ca else None,
+    }
+
+
+def get_rent_per_pyung(entity_name: str = "", entity_type: str = "asset", deposit_yield_pct: Optional[float] = None) -> str:
+    """현재 점유 중인 계약 기준으로 평당 임대료, 유효 임대료(Effective Rent), NOC(실질 임차비용)를 계산합니다.
+
+    - 평당 현재 임대료: 오늘 시점의 스케줄상 월 임대료 / 계약면적 (표면 임대료)
+    - 평당 유효 임대료: 계약 전체 기간 평균 월 임대료(렌트프리 월은 0, 인상·일할 반영) / 계약면적
+    - 렌트프리 할인율: 계약기간 표면 임대료 대비 렌트프리로 줄어든 비율
+    - NOC: (유효 임대료 + 관리비 + 보증금 × 운용이율 / 12) / 계약면적(전체면적)  (사내 기준)
+    평당 단가, 실질 임대료, 렌트프리 감안 수익성, NOC 질문에 사용하세요. 모든 금액은 원화 환산, 월 기준입니다.
 
     Args:
         entity_name: 자산명(한글 별칭 가능) 또는 업체명(일부). 비우면 전체 자산을 자산별로 비교.
         entity_type: 'asset' 또는 'company'
+        deposit_yield_pct: 보증금 운용이율(연 %, 예: 5). 생략하면 시스템 기본값을 사용합니다.
     """
     try:
-        df = fetch_data(
-            "SELECT asset_name, floor, company_name, contract_area, monthly_rent, "
-            "monthly_maintenance_fee, currency FROM lease_contracts WHERE status = 'ACTIVE'"
-        ).copy()
+        dy = (float(deposit_yield_pct) / 100) if deposit_yield_pct is not None else LEASE_ASSUMPTIONS["DEPOSIT_YIELD"]
+        df = fetch_data(f"SELECT * FROM lease_contracts WHERE {CURRENT_OCCUPANCY_SQL}").copy()
         et = (entity_type or "asset").strip().lower()
         label = "전체 자산"
-        if entity_name and entity_name.strip():
+        has_entity = bool(entity_name and entity_name.strip())
+        if has_entity:
             if et == "asset":
                 assets = resolve_assets(entity_name)
                 if assets == []:
@@ -654,33 +691,40 @@ def get_rent_per_pyung(entity_name: str = "", entity_type: str = "asset") -> str
             else:
                 return "entity_type은 'asset' 또는 'company'여야 합니다."
 
-        df["contract_area"] = pd.to_numeric(df["contract_area"], errors="coerce").fillna(0)
-        df = df[df["contract_area"] > 0]
-        if df.empty:
-            return "면적이 있는 유효 계약이 없어 평당 단가를 계산할 수 없습니다."
-        df["rent_krw"] = [_to_krw(v, c) for v, c in zip(df["monthly_rent"], df["currency"])]
-        df["maint_krw"] = [_to_krw(v, c) for v, c in zip(df["monthly_maintenance_fee"], df["currency"])]
+        econ = calc_lease_economics_table(df, deposit_yield=dy)
+        if econ.empty:
+            return "현재 점유 중인 계약이 없어 단가를 계산할 수 없습니다."
+        for c in ("contract_area", "contract_exclusive_area"):
+            econ[c] = pd.to_numeric(econ[c], errors="coerce").fillna(0)
 
-        area = df["contract_area"].sum()
-        rent_py = df["rent_krw"].sum() / area
-        maint_py = df["maint_krw"].sum() / area
+        m = _unit_metrics(econ)
+        fmt = lambda v, unit="원/평": f"{v:,.0f}{unit}" if v is not None else "계산 불가(면적 없음)"
         res = [
-            f"[{label} 평당 단가 (유효 계약, 계약면적 기준 면적가중, 최초 계약 금액 기준)]",
-            f"- 총 계약면적: {area:,.2f}평 ({len(df)}건)",
-            f"- 월 임대료 합계: {_won(df['rent_krw'].sum())}",
-            f"- 월 관리비 합계: {_won(df['maint_krw'].sum())}",
-            f"- 평당 임대료: {rent_py:,.0f}원/평",
-            f"- 평당 관리비: {maint_py:,.0f}원/평",
-            f"- 평당 총비용(NOC): {rent_py + maint_py:,.0f}원/평",
+            f"[{label} 평당 단가 및 NOC (오늘 {date.today():%Y-%m-%d} 점유 계약 {m['계약수']}건, 원화 환산, 월 기준)]",
+            f"- 계약면적 {m['계약면적(평)']:,.2f}평 / 전용면적 {m['전용면적(평)']:,.2f}평",
+            f"- 평당 현재 임대료(표면): {fmt(m['평당 현재 임대료'])}",
+            f"- 평당 유효 임대료(계약기간 평균, 렌트프리·인상 반영): {fmt(m['평당 유효 임대료'])}",
+            f"- 렌트프리 할인율: {m['렌트프리 할인율(%)']}%" if m["렌트프리 할인율(%)"] is not None else "- 렌트프리 할인율: 계산 불가",
+            f"- 평당 관리비(계약기간 평균): {fmt(m['평당 관리비'])}",
+            f"- NOC(전체면적 평당, 보증금 운용이율 {dy * 100:.1f}% 가정): {fmt(m['NOC(평당)'])}",
+            "※ 평당 임대료·관리비·NOC 모두 계약면적(전체면적) 기준입니다.",
         ]
-        group_col = "asset_name" if not (entity_name and entity_name.strip()) else "company_name"
-        g = df.groupby(group_col, as_index=False)[["contract_area", "rent_krw", "maint_krw"]].sum()
-        g["평당임대료"] = (g["rent_krw"] / g["contract_area"]).round(0)
-        g["평당관리비"] = (g["maint_krw"] / g["contract_area"]).round(0)
-        g["평당총비용"] = g["평당임대료"] + g["평당관리비"]
-        g = g.rename(columns={"asset_name": "자산", "company_name": "업체", "contract_area": "계약면적(평)"})
-        g = g.drop(columns=["rent_krw", "maint_krw"]).sort_values("평당총비용", ascending=False)
-        res.append("\n[상세]\n" + _df_to_text(g))
+
+        group_col = "company_name" if has_entity else "asset_name"
+        rows = []
+        for key, g in econ.groupby(group_col):
+            rows.append({"자산" if group_col == "asset_name" else "업체": key, **_unit_metrics(g)})
+        detail = pd.DataFrame(rows)
+        if not detail.empty:
+            detail = detail.sort_values("NOC(평당)", ascending=False, na_position="last")
+            # 숫자는 천 단위 콤마로, 계산 불가(빈 값)는 "-"로 표시
+            for col in detail.columns[1:]:
+                is_pct = "%" in col
+                detail[col] = [
+                    "-" if pd.isna(v) else (f"{v:,.1f}" if is_pct else (f"{v:,.2f}" if "면적" in col else f"{v:,.0f}"))
+                    for v in detail[col]
+                ]
+            res.append("\n[상세]\n" + _df_to_text(detail))
         return "\n".join(res)
     except Exception as e:
         return f"평당 단가 계산 중 오류가 발생했습니다: {e}"
@@ -837,14 +881,16 @@ def _build_system_instruction() -> str:
 - monthly_rent/monthly_maintenance_fee는 최초 계약 금액입니다. 인상·렌트프리·일할이 반영된 실제 수입은 렌트롤 도구로 계산합니다.
 - 임차인·계약 조건 질문은 status='ACTIVE' 계약을 봅니다.
 - '오늘 시점에 실제 점유 중인' 계약은 start_date <= 오늘 <= end_date 이면서 status IN ('ACTIVE','RENEWED')입니다.
+- 공실은 물리적 공실과 모집 가능 공실(입주 예정 신규 계약 제외)을 구분해서 답합니다. 중개·마케팅 목적이면 모집 가능 공실을 기준으로 답합니다.
+- NOC는 (유효 임대료 + 관리비 + 보증금×운용이율/12) / 계약면적(전체면적)입니다. 보증금 운용이율 기본값은 연 {LEASE_ASSUMPTIONS['DEPOSIT_YIELD'] * 100:.1f}%이며, 답변에 가정을 밝힙니다.
 - 렌트프리 월은 rent_free_details에 JSON 배열(예: ["2026-10","2026-11"])로 저장됩니다.
 
 # 도구 선택
 - 임차인 계약 정보: get_contract_details
-- 공실/공실률: get_vacancy_status
+- 공실/공실률, 입주 예정 면적, 모집 가능 공실: get_vacancy_status
 - 만기 도래 계약: get_expiring_contracts / 보증금 반환 일정: get_deposit_return_schedule
 - 월별·연간 수입: get_annual_rent_roll / 기간 비교(전월, 전년, 누계, 임의 월): compare_revenue
-- 평당 단가: get_rent_per_pyung / 특정 월 렌트프리 업체와 기회비용: get_current_rent_free_impact
+- 평당 단가, 유효 임대료(Effective Rent), 렌트프리 할인율, NOC: get_rent_per_pyung / 특정 월 렌트프리 업체와 기회비용: get_current_rent_free_impact
 - 위로 해결되지 않는 조회(임차인 목록, 조건 검색 등): execute_sql_query
 - 서로 독립적인 조회가 여러 개 필요하면 한 번에 병렬로 호출하세요.
 - 도구가 오류나 '찾지 못함'을 반환하면, 안내에 따라 인자나 쿼리를 고쳐 다시 시도하세요.

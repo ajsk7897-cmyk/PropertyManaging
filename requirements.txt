@@ -3,6 +3,7 @@ pandas
 openpyxl
 SQLAlchemy
 psycopg2-binary
+psycopg[binary]
 plotly
 google-genai
 google-generativeai

@@ -7,6 +7,11 @@ st.header("📈 시장 동향 리서치 (한국부동산원 API 연동)")
 st.markdown("한국부동산원 상업용부동산 임대동향조사 오픈 API를 연동하여 주요 상권의 임대료 및 공실률 추이를 분석합니다. *(현재는 UI 데모용 가상 데이터를 표출 중입니다)*")
     
 market_df = fetch_market_research_data()
+
+_required_cols = ["지역명(시/도)", "자산 유형", "기준 분기"]
+if market_df.empty or not all(c in market_df.columns for c in _required_cols):
+    st.info("표시할 시장 동향 데이터가 없습니다. API 키(R_ONE_API_KEY) 설정 또는 API 응답을 확인해주세요.")
+    st.stop()
     
 f1, f2, f3 = st.columns(3)
 with f1:

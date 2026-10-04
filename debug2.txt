@@ -1,25 +1,14 @@
-Generated SQL:
-SELECT 
-    SUM(
-        CASE 
-            WHEN rent_free_details IS NULL OR NOT (rent_free_details ILIKE '%2027-%') THEN 
-                monthly_rent / 30.0 * GREATEST(0, LEAST(COALESCE(end_date, '2027-12-31'::date), '2027-12-31'::date) - GREATEST(start_date, '2027-01-01'::date) + 1)
-            ELSE 0 
-        END
-    ) AS total_rent_2027,
-    SUM(
-        monthly_maintenance_fee / 30.0 * GREATEST(0, LEAST(COALESCE(end_date, '2027-12-31'::date), '2027-12-31'::date) - GREATEST(start_date, '2027-01-01'::date) + 1)
-    ) AS total_maint_2027,
-    SUM(
-        CASE 
-            WHEN rent_free_details IS NULL OR NOT (rent_free_details ILIKE '%2027-%') THEN 
-                monthly_rent / 30.0 * GREATEST(0, LEAST(COALESCE(end_date, '2027-12-31'::date), '2027-12-31'::date) - GREATEST(start_date, '2027-01-01'::date) + 1)
-            ELSE 0 
-        END +
-        monthly_maintenance_fee / 30.0 * GREATEST(0, LEAST(COALESCE(end_date, '2027-12-31'::date), '2027-12-31'::date) - GREATEST(start_date, '2027-01-01'::date) + 1)
-    ) AS total_income_2027
-FROM lease_contracts
-WHERE asset_name ILIKE '%HQ%'
-  AND status = 'ACTIVE'
-  AND start_date <= '2027-12-31'
-  AND (end_date IS NULL OR end_date >= '2027-01-01');
+Start
+EXEC: SELECT DISTINCT company_name, rent_free_details, floor FROM lease_contracts WHERE asset_name = 'HQ' AND status = 'ACTIVE' AND (rent_free_details LIKE '%10¿ù%' OR rent_schedule LIKE '%10¿ù%')
+EXEC: SELECT company_name, floor, rent_free_details, rent_schedule FROM lease_contracts WHERE asset_name = 'HQ' AND status = 'ACTIVE' AND (total_rent_free_months > 0 OR rent_free_details IS NOT NULL)
+EXEC: SELECT DISTINCT asset_name FROM lease_contracts
+EXEC: SELECT company_name, floor, rent_free_details, rent_schedule, start_date, end_date FROM lease_contracts WHERE asset_name = 'HQ Building' AND status = 'ACTIVE'
+EXEC: SELECT asset_name, company_name, floor, rent_free_details, rent_schedule FROM lease_contracts WHERE status = 'ACTIVE' LIMIT 10
+EXEC: SELECT company_name, floor, rent_free_details FROM lease_contracts WHERE asset_name = 'HQ Building' AND status = 'ACTIVE' AND rent_free_details LIKE '%10¿ù%'
+EXEC: SELECT company_name, floor, rent_free_details FROM lease_contracts WHERE asset_name = 'HQ Building' AND status = 'ACTIVE' AND (rent_free_details LIKE '%2026-10%' OR rent_free_details LIKE '%10%')
+EXEC: SELECT company_name, floor, rent_free_details FROM lease_contracts WHERE asset_name = 'HQ Building' AND status = 'ACTIVE' AND rent_free_details LIKE '%2026-10%'
+EXEC: SELECT company_name, floor, rent_free_details FROM lease_contracts WHERE asset_name = 'HQ Building' AND status = 'ACTIVE'
+EXEC: SELECT asset_name, company_name, floor, rent_free_details FROM lease_contracts WHERE asset_name = 'HQ Building' AND status = 'ACTIVE'
+EXEC: SELECT DISTINCT asset_name, status FROM lease_contracts
+EXEC: SELECT company_name, floor, rent_free_details FROM lease_contracts WHERE asset_name = 'HQ Building' AND (status = 'ACTIVE' OR status = 'RENEWED')
+EXEC: SELECT asset_name, company_name, floor, rent_free_details FROM lease_contracts WHERE rent_free_details IS NOT NULL AND rent_free_details != '[]'

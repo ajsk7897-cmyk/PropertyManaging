@@ -49,7 +49,8 @@ if not df_c.empty:
         df_rr_krw = df_rr[df_rr["통화"] == "KRW"].copy()
         df_rr_usd = df_rr[df_rr["통화"] == "USD"].copy()
 
-        df_rr_with_sub, sub_indices = add_subtotal_rows(df_rr, "자산명")
+        df_rr_export = df_rr.drop(columns=["_change_map"], errors="ignore")
+        df_rr_with_sub, sub_indices = add_subtotal_rows(df_rr_export, "자산명")
         csv_rr = generate_formatted_excel(df_rr_with_sub, sub_indices)
         file_name_3 = f"rent_roll_{selected_year}_details.xlsx"
 
@@ -186,6 +187,8 @@ if not df_c.empty:
 
             edited_krw = None
             edited_usd = None
+            df_rr_krw = df_rr_krw.drop(columns=["_change_map"], errors="ignore")
+            df_rr_usd = df_rr_usd.drop(columns=["_change_map"], errors="ignore")
 
             if not df_rr_krw.empty:
                 st.markdown("#### 🇰🇷 KRW 렌트롤")

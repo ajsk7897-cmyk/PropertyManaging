@@ -18,6 +18,10 @@ from openpyxl.utils import get_column_letter
 def generate_formatted_excel(df, subtotal_indices=None):
     if subtotal_indices is None:
         subtotal_indices = []
+
+    internal_cols = [c for c in df.columns if str(c).startswith("_")]
+    if internal_cols:
+        df = df.drop(columns=internal_cols, errors="ignore")
         
     output = io.BytesIO()
     
@@ -125,6 +129,10 @@ def generate_formatted_excel(df, subtotal_indices=None):
     return output.getvalue()
 
 def add_subtotal_rows(df, group_col):
+    internal_cols = [c for c in df.columns if str(c).startswith("_")]
+    if internal_cols:
+        df = df.drop(columns=internal_cols, errors="ignore")
+
     new_rows = []
     subtotal_indices = []
     current_index = 0

@@ -34,10 +34,18 @@ from utils import (
     get_upcoming_new_leases_by_floor,
 )
 
-MODEL_NAME = "gemini-3.5-flash"
-MAX_TOOL_ROUNDS = 5        # 모델 ↔ 도구 왕복 최대 횟수
-MAX_TOOL_CALLS = 10        # 한 질문당 도구 실행 최대 횟수(병렬 호출 포함)
-MAX_RESULT_CHARS = 12000   # 도구 결과를 모델에 넘길 때의 최대 길이
+MODEL_NAME = "gemini-2.5-flash"
+MODEL_CANDIDATES = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.8-flash",
+]
+MAX_TOOL_ROUNDS = 4        # 모델 ↔ 도구 왕복 최대 횟수
+MAX_TOOL_CALLS = 8         # 한 질문당 도구 실행 최대 횟수(병렬 호출 포함)
+MAX_RESULT_CHARS = 10000   # 도구 결과를 모델에 넘길 때의 최대 길이
 MAX_TABLE_ROWS = 80        # 표 형태 결과의 최대 행 수
 HISTORY_MESSAGES = 6       # 모델에 넘길 직전 대화 메시지 수
 SQL_TIMEOUT = "8s"
@@ -111,6 +119,7 @@ TOOL_LABELS = {
     "get_deposit_return_schedule": "보증금 반환 일정 조회",
     "get_rent_per_pyung": "평당 단가 계산",
     "get_current_rent_free_impact": "렌트프리 현황 계산",
+    "get_asset_tenants": "자산별 임차인 조회",
 }
 
 
@@ -323,7 +332,7 @@ def execute_sql_query(sql_query: str) -> str:
         )
 
 
-def get_annual_rent_roll(year: int, asset_name: str = "") -> str:
+def get_annual_rent_roll(year: int, asset_name: str = "", month: int = 0) -> str:
     """특정 연도의 월별 임대료/관리비 수입(렌트롤)을 계산합니다.
 
     렌트프리, 중도 입퇴점 일할 계산, 임대료 인상 스케줄, 수동 조정값이 모두 반영된 실제 청구 기준입니다.
@@ -332,6 +341,7 @@ def get_annual_rent_roll(year: int, asset_name: str = "") -> str:
     Args:
         year: 조회 연도 (예: 2026)
         asset_name: 자산명(한글 별칭 가능, 예: '본점'). 비우면 전체 자산.
+        month: 특정 월(1~12)을 지정하면 해당 월 수입을 상단에 요약 표시합니다. 비우거나 0이면 연간 전체 요약.
     """
     try:
         assets = resolve_assets(asset_name)
@@ -343,6 +353,10 @@ def get_annual_rent_roll(year: int, asset_name: str = "") -> str:
 
         label = ", ".join(assets) if assets else "전체 자산"
         lines = [f"[{year}년 렌트롤 (자산: {label}, 원화 환산, 1~12월)]"]
+        target_m = int(month or 0)
+        if 1 <= target_m <= 12:
+            mr, mmt = _sum_months(df, [target_m])
+            lines.append(f"=> {year}년 {target_m}월 총수입: {_won(mr + mmt)} (임대료 {_won(mr)} / 관리비 {_won(mmt)})\n")
         total_rent = total_maint = 0.0
         for m in range(1, 13):
             r, mt = _sum_months(df, [m])
@@ -795,6 +809,51 @@ def get_current_rent_free_impact(year: int, month: int, asset_name: str = "") ->
         return f"렌트프리 계산 중 오류가 발생했습니다: {e}"
 
 
+def get_asset_tenants(asset_name: str, floor: str = "") -> str:
+    """특정 자산(및 선택적 층)의 현재 유효/점유 임대차 계약 및 임차인 목록을 조회합니다.
+
+    '본점 임차인 목록', '부산 입주사 알려줘', '본점 15층 누가 써?' 같은 질문에 사용하세요.
+
+    Args:
+        asset_name: 자산명(한글 별칭 가능, 예: '본점')
+        floor: 특정 층(예: '15F', '15층', 'B1'). 비우면 해당 자산 전체 층.
+    """
+    try:
+        assets = resolve_assets(asset_name)
+        if not assets:
+            return _asset_not_found(asset_name)
+        sql = """
+            SELECT asset_name, floor, company_name, status, start_date, end_date,
+                   contract_area AS 계약면적_평, contract_exclusive_area AS 전용면적_평,
+                   deposit, monthly_rent, monthly_maintenance_fee, currency
+            FROM lease_contracts
+            WHERE asset_name IN :assets
+              AND status IN ('ACTIVE', 'RENEWED')
+              AND end_date >= CURRENT_DATE
+            ORDER BY asset_name, floor, company_name
+        """
+        df = _read_sql(sql, {"assets": assets}, expanding=("assets",))
+        if df.empty:
+            return f"{', '.join(assets)}에 현재 유효한 임대차 계약이 없습니다."
+
+        fl_raw = (floor or "").strip().upper().replace("층", "").replace("F", "").strip()
+        if fl_raw:
+            target_fl = f"{fl_raw}F"
+
+            def _match_floor(f_val):
+                tokens = [t.strip().upper().replace("F", "") + "F" for t in str(f_val or "").split(",") if t.strip()]
+                return target_fl in tokens
+
+            df = df[df["floor"].apply(_match_floor)]
+            if df.empty:
+                return f"{', '.join(assets)} {target_fl}에 해당하는 유효 임대차 계약이 없습니다."
+
+        label = f"{', '.join(assets)}" + (f" {fl_raw}F" if fl_raw else "")
+        return f"[{label} 임차인 및 계약 현황 (총 {len(df)}건)]\n" + _df_to_text(df)
+    except Exception as e:
+        return f"자산별 임차인 조회 중 오류가 발생했습니다: {e}"
+
+
 TOOLS = [
     get_contract_details,
     get_vacancy_status,
@@ -804,14 +863,296 @@ TOOLS = [
     get_deposit_return_schedule,
     get_rent_per_pyung,
     get_current_rent_free_impact,
+    get_asset_tenants,
     execute_sql_query,
 ]
 TOOL_MAP = {fn.__name__: fn for fn in TOOLS}
 
 
 # ---------------------------------------------------------------------------
-# 에이전트
+# 로컬 직행 라우터 (정형 질문은 API 호출 0회로 즉시 응답)
 # ---------------------------------------------------------------------------
+def _extract_assets_from_query(q: str) -> list:
+    """질문 문장에서 언급된 DB 자산명 리스트를 추출합니다 (긴 별칭 우선 매칭)."""
+    try:
+        valid_names = set(_all_asset_names())
+    except Exception:
+        valid_names = set(ASSET_ALIASES.keys())
+
+    candidates = []
+    for real, aliases in ASSET_ALIASES.items():
+        if real not in valid_names:
+            continue
+        for alias in aliases + [real]:
+            a_norm = _norm(alias)
+            if a_norm:
+                candidates.append((len(a_norm), a_norm, real))
+    for real in valid_names:
+        r_norm = _norm(real)
+        if r_norm:
+            candidates.append((len(r_norm), r_norm, real))
+
+    # 긴 별칭부터 매칭해 '부산기숙사'가 '부산'으로 잘못 매칭되지 않도록 함
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    q_work = _norm(q)
+    matched = []
+    for _, a_norm, real in candidates:
+        if a_norm in q_work:
+            if real not in matched:
+                matched.append(real)
+            q_work = q_work.replace(a_norm, " ")
+    return matched
+
+
+def _extract_year_month(q: str, today: date) -> tuple:
+    """질문에서 기준 (연도, 월 또는 None)을 추출합니다."""
+    # '전월 대비', '전년 동월 대비' 등의 비교 수식어는 기준 시점이 아니므로 먼저 제거
+    q_clean = re.sub(
+        r"(?:전월|지난\s*달|저번\s*달|전년\s*동월|전년\s*동기|전년|작년|지난해)\s*(?:대비|비교|비)",
+        " ",
+        q.strip(),
+    )
+    if any(k in q_clean for k in ("다다음달", "다다음 달", "모레달")):
+        idx = today.year * 12 + (today.month - 1) + 2
+        return idx // 12, idx % 12 + 1
+    if any(k in q_clean for k in ("다음달", "다음 달", "내달", "익월")):
+        idx = today.year * 12 + (today.month - 1) + 1
+        return idx // 12, idx % 12 + 1
+    if any(k in q_clean for k in ("이번달", "이번 달", "당월", "금월", "현재월")):
+        return today.year, today.month
+    if any(k in q_clean for k in ("지난달", "지난 달", "전월", "저번달", "저번 달")):
+        idx = today.year * 12 + (today.month - 1) - 1
+        return idx // 12, idx % 12 + 1
+
+    # YYYY-MM 또는 YY-MM 패턴
+    m_ym = re.search(r"(?:20)?(\d{2})\s*[-./]\s*(1[0-2]|0?[1-9])(?!\d)", q_clean)
+    if m_ym:
+        return 2000 + int(m_ym.group(1)), int(m_ym.group(2))
+
+    year = today.year
+    if any(k in q_clean for k in ("작년", "전년", "지난해")):
+        year = today.year - 1
+    elif any(k in q_clean for k in ("내년", "명년", "다음해")):
+        year = today.year + 1
+    else:
+        m_y = re.search(r"(?:20)?(\d{2})\s*년(?!\s*(?:내|이내|간|동안|주기))", q_clean)
+        if m_y:
+            year = 2000 + int(m_y.group(1))
+
+    month = None
+    # '3개월'의 '월'과 구분하기 위해 앞에 숫자와 '개'가 없는 월만 추출
+    m_m = re.search(r"(?<![0-9])(1[0-2]|0?[1-9])\s*월(?!\s*(?:간|동안))", q_clean)
+    if m_m:
+        month = int(m_m.group(1))
+
+    return year, month
+
+
+def _extract_months_ahead(q: str, today: date) -> int:
+    """'3개월 내', '반기', '올해' 등에서 개월 수를 추출합니다."""
+    m = re.search(r"(\d+)\s*개월", q)
+    if m:
+        return max(1, int(m.group(1)))
+    m_y = re.search(r"(\d+)\s*년\s*(?:내|이내|안)", q)
+    if m_y:
+        return max(1, int(m_y.group(1)) * 12)
+    if "반기" in q:
+        return 6
+    if "분기" in q:
+        return 3
+    if any(k in q for k in ("이번달", "이번 달", "당월", "한달", "한 달")):
+        return 1
+    if any(k in q for k in ("올해", "금년", "연말")):
+        return max(1, 12 - today.month + 1)
+    return 3
+
+
+_GENERIC_COMPANY_STOPWORDS = {
+    "주식회사", "유한회사", "법무법인", "세무법인", "노무법인", "회계법인",
+    "서울지점", "부산지점", "대전지점", "광주지점", "본점", "지점", "사무실", "창고",
+}
+
+
+def _extract_company_from_query(q: str) -> Optional[str]:
+    """질문 내에 DB의 임차인(업체명)이 포함되어 있으면 가장 긴 매칭 업체명을 반환합니다."""
+    try:
+        all_companies = _all_company_names()
+    except Exception:
+        return None
+    q_norm = _norm(q)
+    best = None
+    for comp in all_companies:
+        # 1) 원본 정규화 매칭
+        c_norm = _norm(comp)
+        # 2) (주), 주식회사, 끝자리 연월 숫자(2509 등) 제거한 핵심 이름
+        core = re.sub(r"\(\d{4}\)$", "", str(comp)).strip()
+        core = re.sub(r"(\(주\)|\(유\)|\(사\)|\(재\)|주식회사|유한회사)", "", core).strip()
+        core_norm = _norm(core)
+        for token in (c_norm, core_norm):
+            if len(token) < 2 or token in _GENERIC_COMPANY_STOPWORDS:
+                continue
+            if token in q_norm:
+                if best is None or len(token) > best[0]:
+                    best = (len(token), comp)
+    return best[1] if best else None
+
+
+def _try_direct_route(user_message: str, chat_history=None) -> Optional[tuple]:
+    """정형 질문을 판별해 Gemini API 호출 없이 즉시 도구 실행 결과를 반환합니다.
+
+    반환값: (status_text, answer_markdown) 또는 None(복합/비정형 질문은 LLM으로 전달)
+    """
+    q = (user_message or "").strip()
+    if not q:
+        return None
+    q_low = q.lower()
+
+    # 복합 조건/정렬/특수 컬럼 질문은 LLM(또는 SQL 도구)이 처리하도록 넘김
+    complex_markers = (
+        "이상", "이하", "초과", "미만", "상위", "하위", "top", "순으로", "순서",
+        "제일", "가장", "최대", "최소", "달러", "usd", "위약금", "패널티",
+        "변경 이력", "변경이력", "수동 조정", "수동조정", "오버라이드", "인상률",
+        "왜 ", "어떻게", "차이점", "설명해",
+    )
+    if any(m in q_low for m in complex_markers):
+        return None
+
+    today = date.today()
+    assets = _extract_assets_from_query(q)
+    # 복수 자산 비교 질문(예: '본점이랑 부산 비교')은 LLM 병렬 도구 호출로 넘김
+    if len(assets) > 1:
+        return None
+    asset_arg = assets[0] if len(assets) == 1 else ""
+
+    # 직전 대화 맥락에서 자산명 이어받기 ('거기', '그 자산', '해당 빌딩' 등 지시어가 있을 때)
+    if not asset_arg and chat_history and any(k in q for k in ("거기", "그곳", "그 자산", "해당 자산", "그 빌딩")):
+        if isinstance(chat_history, list):
+            for prev in reversed(chat_history):
+                prev_assets = _extract_assets_from_query(str(prev.get("content", "")))
+                if len(prev_assets) == 1:
+                    asset_arg = prev_assets[0]
+                    break
+
+    # 1. 특정 월 렌트프리 업체 / 기회비용 조회
+    if any(k in q_low for k in ("렌트프리", "렌트 프리", "rent free", "rent-free", "무상임대", "임대료 면제")):
+        if not any(k in q_low for k in ("할인율", "유효", "noc", "평당", "평단가")):
+            y, m = _extract_year_month(q, today)
+            target_m = m if m is not None else today.month
+            return (
+                f"🔎 {TOOL_LABELS['get_current_rent_free_impact']} 중...",
+                get_current_rent_free_impact(y, target_m, asset_arg),
+            )
+
+    # 2. 보증금 반환 일정 조회
+    if "보증금" in q and any(k in q for k in ("반환", "돌려", "일정", "예정", "만기", "개월")):
+        months = _extract_months_ahead(q, today)
+        return (
+            f"🔎 {TOOL_LABELS['get_deposit_return_schedule']} 중...",
+            get_deposit_return_schedule(months, asset_arg),
+        )
+
+    # 3. 만기 도래 계약 조회
+    if any(k in q for k in ("만기", "만료", "종료 예정", "끝나는 계약")):
+        months = _extract_months_ahead(q, today)
+        return (
+            f"🔎 {TOOL_LABELS['get_expiring_contracts']} 중...",
+            get_expiring_contracts(months, asset_arg),
+        )
+
+    # 4. 공실 현황 / 모집 가능 공실 / 임대율 조회
+    if any(k in q for k in ("공실", "모집가능", "모집 가능", "빈 층", "빈방", "임대가능면적", "임대 가능 면적", "임대율")):
+        return (
+            f"🔎 {TOOL_LABELS['get_vacancy_status']} 중...",
+            get_vacancy_status(asset_arg),
+        )
+
+    # 5. 평당 단가 / 유효 임대료 / 렌트프리 할인율 / NOC 계산
+    if any(k in q_low for k in ("평당", "평단가", "유효임대료", "유효 임대료", "effective rent", "noc", "할인율", "실질 임대료", "실질 임차비용")):
+        m_yield = re.search(r"(\d+(?:\.\d+)?)\s*%", q)
+        dy_pct = float(m_yield.group(1)) if m_yield else None
+        comp = _extract_company_from_query(q) if not asset_arg else None
+        if comp:
+            return (
+                f"🔎 {TOOL_LABELS['get_rent_per_pyung']} 중...",
+                get_rent_per_pyung(comp, "company", dy_pct),
+            )
+        return (
+            f"🔎 {TOOL_LABELS['get_rent_per_pyung']} 중...",
+            get_rent_per_pyung(asset_arg, "asset", dy_pct),
+        )
+
+    # 6. 기간별 수익 비교 (전월 대비, 전년 대비, 누계, 월 비교)
+    if any(k in q_low for k in ("전월 대비", "전월대비", "전월비", "지난달 대비", "mom", "전년 대비", "전년대비", "전년 동월", "작년 대비", "yoy", "ytd", "대비", "증감")):
+        if any(k in q for k in ("수입", "수익", "임대료", "관리비", "매출", "렌트롤")):
+            comp = _extract_company_from_query(q) if not asset_arg else None
+            e_type = "asset" if asset_arg else ("company" if comp else "all")
+            e_name = asset_arg or comp or ""
+            y, m = _extract_year_month(q, today)
+            bm = m if m is not None else today.month
+            if any(k in q_low for k in ("전월", "지난달", "mom")):
+                return (
+                    f"🔎 {TOOL_LABELS['compare_revenue']} 중...",
+                    compare_revenue(e_name, e_type, "MoM", y, bm),
+                )
+            if "누계" in q or "ytd" in q_low:
+                return (
+                    f"🔎 {TOOL_LABELS['compare_revenue']} 중...",
+                    compare_revenue(e_name, e_type, "YTD", y, bm),
+                )
+            if any(k in q_low for k in ("전년 동월", "전년동월", "yoy")) or (m is not None and any(k in q for k in ("전년", "작년"))):
+                return (
+                    f"🔎 {TOOL_LABELS['compare_revenue']} 중...",
+                    compare_revenue(e_name, e_type, "YoY", y, bm),
+                )
+            if any(k in q for k in ("전년", "작년")):
+                return (
+                    f"🔎 {TOOL_LABELS['compare_revenue']} 중...",
+                    compare_revenue(e_name, e_type, "Annual", y, 0),
+                )
+
+    # 7. 특정 업체(임차인) 계약 상세 조회
+    comp = _extract_company_from_query(q)
+    if comp and not any(k in q for k in ("렌트롤", "공실", "만기")):
+        inc_inactive = any(k in q for k in ("과거", "이력", "해지", "갱신전", "갱신 전", "전체 계약", "모든 계약"))
+        return (
+            f"🔎 {TOOL_LABELS['get_contract_details']} 중...",
+            get_contract_details(comp, include_inactive=inc_inactive),
+        )
+
+    # 8. 연간 / 월별 임대료·관리비 수입 (렌트롤)
+    if any(k in q for k in ("렌트롤", "임대료 수입", "관리비 수입", "총수입", "월별 수입", "연간 수입", "연간 임대료", "연간 관리비", "임대 수익", "임대수익")) or (
+        any(k in q for k in ("임대료", "관리비", "수입")) and any(k in q for k in ("올해", "금년", "작년", "내년", "이번달", "다음달", "지난달", "년", "월", "얼마", "합계", "총액"))
+    ):
+        y, m = _extract_year_month(q, today)
+        return (
+            f"🔎 {TOOL_LABELS['get_annual_rent_roll']} 중...",
+            get_annual_rent_roll(y, asset_arg, month=m or 0),
+        )
+
+    # 9. 특정 자산의 층별/전체 임차인(입주사) 목록 조회
+    m_floor = re.search(r"\b(B?\d{1,2})\s*(?:층|F|f)\b", q)
+    if asset_arg and (
+        m_floor
+        or any(k in q for k in ("임차인", "입주사", "입주 업체", "입주업체", "테넌트", "계약 목록", "계약 현황", "누가"))
+    ):
+        fl_str = m_floor.group(1) if m_floor else ""
+        return (
+            f"🔎 {TOOL_LABELS['get_asset_tenants']} 중...",
+            get_asset_tenants(asset_arg, fl_str),
+        )
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 에이전트 & 다중 모델 자동 폴백 (Multi-Model Fallback)
+# ---------------------------------------------------------------------------
+_MODEL_COOLDOWN: dict = {}   # model_name -> cooldown 해제 시각(epoch)
+_NEXT_MODEL_IDX: int = 0     # 라운드별 모델 분산 인덱스
+_RESPONSE_CACHE: dict = {}   # (norm_q, hist_key, date_str) -> (timestamp, answer_str)
+_CACHE_TTL_SEC = 600         # 동일 질문 캐시 유지 시간 (10분)
+
+
 def _find_key(d, key):
     """중첩된 설정에서 key를 찾습니다. (secrets.toml에서 키가 다른 섹션 아래에 들어간 경우 대비)"""
     try:
@@ -847,7 +1188,16 @@ def get_gemini_api_key():
 @st.cache_resource(show_spinner=False)
 def _get_client(api_key: str):
     from google import genai
-    return genai.Client(api_key=api_key)
+    from google.genai import types
+    try:
+        # SDK 내부의 장시간 자동 재시도(기본 5회)를 1회로 제한해 429 발생 시 즉시 다음 모델로 폴백하도록 설정
+        http_opts = types.HttpOptions(
+            timeout=20000,
+            retry_options=types.HttpRetryOptions(attempts=1),
+        )
+        return genai.Client(api_key=api_key, http_options=http_opts)
+    except Exception:
+        return genai.Client(api_key=api_key)
 
 
 def _month_shift(d: date, delta: int) -> str:
@@ -886,7 +1236,7 @@ def _build_system_instruction() -> str:
 - 렌트프리 월은 rent_free_details에 JSON 배열(예: ["2026-10","2026-11"])로 저장됩니다.
 
 # 도구 선택
-- 임차인 계약 정보: get_contract_details
+- 임차인 계약 정보: get_contract_details / 특정 자산·층의 임차인 목록: get_asset_tenants
 - 공실/공실률, 입주 예정 면적, 모집 가능 공실: get_vacancy_status
 - 만기 도래 계약: get_expiring_contracts / 보증금 반환 일정: get_deposit_return_schedule
 - 월별·연간 수입: get_annual_rent_roll / 기간 비교(전월, 전년, 누계, 임의 월): compare_revenue
@@ -965,44 +1315,71 @@ def _clip(result: str) -> str:
 
 def _is_transient(e: Exception) -> bool:
     msg = str(e).lower()
-    return any(k in msg for k in ("503", "unavailable", "overloaded", "500", "internal", "deadline"))
+    return any(k in msg for k in ("503", "unavailable", "overloaded", "500", "internal", "deadline", "timeout"))
 
 
 def _is_rate_limited(e: Exception) -> bool:
     msg = str(e).lower()
-    return "429" in msg or "resource_exhausted" in msg or "quota" in msg
+    return "429" in msg or "resource_exhausted" in msg or "quota" in msg or "rate" in msg
+
+
+def _is_model_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return any(k in msg for k in ("404", "not_found", "not found", "400", "invalid_argument", "not supported"))
 
 
 def _friendly_error(e: Exception) -> str:
     msg = str(e)
     low = msg.lower()
     if "429" in msg or "quota" in low or "resource_exhausted" in low:
-        return "API 사용량 한도에 도달했습니다. 1분 정도 후에 다시 질문해 주세요."
+        return "현재 모든 AI 모델의 무료 API 호출 한도가 일시 소진되었습니다. 잠시 후 다시 시도해 주세요."
     if _is_transient(e):
         return "Gemini 서버가 일시적으로 혼잡합니다. 잠시 후 다시 질문해 주세요."
     return f"답변 생성 중 오류가 발생했습니다: {msg[:300]}"
 
 
-def _stream_with_retry(client, contents, config, retries: int = 2):
-    """일시적 서버 오류와 분당 호출 한도(429)는 첫 응답 조각을 받기 전까지만 재시도합니다."""
-    for attempt in range(retries + 1):
+def _ordered_models() -> list:
+    """쿨다운이 아닌 모델을 우선 배치하고, 호출마다 시작 모델을 회전(Round-Robin)합니다."""
+    global _NEXT_MODEL_IDX
+    now = time.time()
+    n = len(MODEL_CANDIDATES)
+    start = _NEXT_MODEL_IDX % n
+    _NEXT_MODEL_IDX = (_NEXT_MODEL_IDX + 1) % n
+    rotated = MODEL_CANDIDATES[start:] + MODEL_CANDIDATES[:start]
+    ready = [m for m in rotated if _MODEL_COOLDOWN.get(m, 0) <= now]
+    cooling = [m for m in rotated if _MODEL_COOLDOWN.get(m, 0) > now]
+    cooling.sort(key=lambda m: _MODEL_COOLDOWN.get(m, 0))
+    return ready + cooling
+
+
+def _stream_with_fallback(client, contents, config):
+    """여러 Gemini 모델을 순회하며 429/503 발생 시 대기 없이 즉시 다음 모델로 폴백합니다."""
+    models = _ordered_models()
+    last_err = None
+    for model_name in models:
         received = False
         try:
             for chunk in client.models.generate_content_stream(
-                model=MODEL_NAME, contents=contents, config=config
+                model=model_name, contents=contents, config=config
             ):
                 received = True
                 yield chunk
             return
         except Exception as e:
-            if not received and attempt < retries:
-                if _is_transient(e):
-                    time.sleep(1.5 * (attempt + 1))
-                    continue
-                if _is_rate_limited(e):
-                    time.sleep(5 * (attempt + 1))  # 5초, 10초 대기 후 재시도
-                    continue
-            raise
+            last_err = e
+            now = time.time()
+            if _is_rate_limited(e):
+                _MODEL_COOLDOWN[model_name] = now + 65.0
+            elif _is_transient(e):
+                _MODEL_COOLDOWN[model_name] = now + 20.0
+            elif _is_model_error(e):
+                _MODEL_COOLDOWN[model_name] = now + 300.0
+            if received:
+                raise
+            # 아직 첫 조각을 받지 못했다면 즉시 다음 후보 모델로 전환
+            continue
+    if last_err is not None:
+        raise last_err
 
 
 def stream_chat_response(user_message: str, chat_history=None):
@@ -1013,6 +1390,24 @@ def stream_chat_response(user_message: str, chat_history=None):
       - ("delta", 문자열): 답변 텍스트 조각
       - ("reset", None): 지금까지 출력한 텍스트를 지움 (도구 호출 전 중간 멘트였던 경우)
     """
+    # 1단계: 정형 실무 질문은 API 호출 없이(0회) 로컬 라우터로 즉시 DB 계산 결과 반환
+    direct = _try_direct_route(user_message, chat_history)
+    if direct is not None:
+        status_msg, direct_answer = direct
+        yield ("status", status_msg)
+        yield ("delta", direct_answer)
+        return
+
+    # 2단계: 동일 질문 캐시 확인 (최근 10분 이내 동일 질문이면 API 호출 생략)
+    hist_tail = ""
+    if isinstance(chat_history, list) and chat_history:
+        hist_tail = _norm(str(chat_history[-1].get("content", ""))[:120])
+    cache_key = (_norm(user_message), hist_tail, str(date.today()))
+    cached = _RESPONSE_CACHE.get(cache_key)
+    if cached and (time.time() - cached[0]) < _CACHE_TTL_SEC:
+        yield ("delta", cached[1])
+        return
+
     api_key = get_gemini_api_key()
     if not api_key:
         yield ("delta", "GEMINI_API_KEY가 설정되지 않았습니다. .streamlit/secrets.toml을 확인해 주세요.")
@@ -1030,44 +1425,59 @@ def stream_chat_response(user_message: str, chat_history=None):
         temperature=0.2,
         # SDK의 자동 함수 실행을 끄고 직접 실행합니다(병렬 호출 처리, 진행 상황 표시, 한도 제어).
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-        # 단순 DB 조회형 질문이 대부분이라 깊은 추론보다 응답 속도가 중요합니다.
-        thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW),
     )
     config = types.GenerateContentConfig(**base_kwargs)
     # 마지막 라운드에서는 도구 호출을 막고 지금까지의 결과로 답하게 합니다.
     final_config = types.GenerateContentConfig(
         **base_kwargs,
         tool_config=types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfigMode.NONE
+            if hasattr(types, "FunctionCallingConfigMode")
+            else types.FunctionCallingConfig(mode="NONE")
+        )
+        if False
+        else types.ToolConfig(
             function_calling_config=types.FunctionCallingConfig(mode=types.FunctionCallingConfigMode.NONE)
         ),
     )
 
     total_calls = 0
     emitted_any = False
+    collected_tool_outputs = []
+    full_answer_parts = []
     try:
         for round_idx in range(MAX_TOOL_ROUNDS + 1):
             cfg = final_config if round_idx == MAX_TOOL_ROUNDS else config
             parts, calls, emitted = [], [], False
-            for chunk in _stream_with_retry(client, contents, cfg):
+            for chunk in _stream_with_fallback(client, contents, cfg):
                 cand = chunk.candidates[0] if chunk.candidates else None
                 if not cand or not cand.content or not cand.content.parts:
                     continue
                 for p in cand.content.parts:
-                    parts.append(p)  # thought_signature 보존을 위해 모든 part를 그대로 보관
+                    parts.append(p)
                     if p.function_call:
                         calls.append(p.function_call)
-                    elif p.text and not p.thought:
+                    elif p.text and not getattr(p, "thought", False):
                         emitted = emitted_any = True
+                        full_answer_parts.append(p.text)
                         yield ("delta", p.text)
 
             if not calls:
                 if not emitted:
-                    yield ("delta", "죄송합니다. 답변을 생성하지 못했습니다. 질문을 조금 바꿔서 다시 시도해 주세요.")
+                    if collected_tool_outputs:
+                        fallback_text = "\n\n".join(collected_tool_outputs)
+                        yield ("delta", fallback_text)
+                        _RESPONSE_CACHE[cache_key] = (time.time(), fallback_text)
+                    else:
+                        yield ("delta", "죄송합니다. 답변을 생성하지 못했습니다. 질문을 조금 바꿔서 다시 시도해 주세요.")
+                else:
+                    _RESPONSE_CACHE[cache_key] = (time.time(), "".join(full_answer_parts))
                 return
 
             if emitted:
                 yield ("reset", None)
                 emitted_any = False
+                full_answer_parts.clear()
             contents.append(types.Content(role="model", parts=parts))
 
             responses = []
@@ -1078,13 +1488,22 @@ def stream_chat_response(user_message: str, chat_history=None):
                     result = "도구 호출 한도를 초과했습니다. 지금까지 조회한 결과만으로 답변하세요."
                 else:
                     result = _run_tool(fc.name, dict(fc.args or {}))
+                    if result and not result.startswith(("오류:", "쿼리 실행 오류:", "알 수 없는 도구", "도구 ")):
+                        collected_tool_outputs.append(result)
                 responses.append(types.Part.from_function_response(
                     name=fc.name, response={"result": _clip(result)}
                 ))
             contents.append(types.Content(role="user", parts=responses))
             yield ("status", "✍️ 답변 작성 중...")
     except Exception as e:
-        if emitted_any:
+        # 도구 실행으로 DB 조회 결과가 이미 확보된 상태에서 2차 LLM 호출이 한도 초과 등으로 실패한 경우,
+        # 에러 대신 조회된 DB 데이터 표를 즉시 반환하여 실무 사용이 끊기지 않도록 보장합니다.
+        if collected_tool_outputs and not emitted_any:
+            yield ("reset", None)
+            fallback_text = "\n\n".join(collected_tool_outputs)
+            yield ("delta", fallback_text)
+            _RESPONSE_CACHE[cache_key] = (time.time(), fallback_text)
+        elif emitted_any:
             yield ("delta", f"\n\n(응답이 중단되었습니다: {_friendly_error(e)})")
         else:
             yield ("reset", None)

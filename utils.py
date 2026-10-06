@@ -913,32 +913,33 @@ body {{ margin: 0; font-family: 'Pretendard', 'Inter', sans-serif; -webkit-font-
     components.html(wrapper, height=calculated_height, scrolling=False)
 
 
-# DB Init
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
+def get_engine():
+    from sqlalchemy import create_engine
+
+    return create_engine(
+        st.secrets["DATABASE_URL"], pool_size=5, max_overflow=2, pool_recycle=300, pool_pre_ping=True
+    )
+
+
+engine = get_engine()
+
+
+# DB Init (단일 배치 실행으로 초기 구동 시 18회 왕복 쿼리 지연 제거)
+@st.cache_resource(show_spinner=False)
 def init_db():
-    # Use Streamlit secrets for Supabase connection
-    db_url = st.secrets["DATABASE_URL"]
-    conn = psycopg2.connect(db_url)
-    conn.autocommit = False
-    c = conn.cursor()
-    c.execute("""
+    ddl = """
         CREATE TABLE IF NOT EXISTS Asset_Area (
             asset_name TEXT,
             floor TEXT,
             exclusive_area REAL,
             common_area REAL,
             total_area REAL,
+            bank_area REAL DEFAULT 0.0,
             PRIMARY KEY (asset_name, floor)
-        )
-    """)
-    conn.commit()
-    try:
-        c.execute("ALTER TABLE Asset_Area ADD COLUMN bank_area REAL DEFAULT 0.0")
-        conn.commit()
-    except psycopg2.DatabaseError:
-        conn.rollback()
-        pass
-    c.execute("""
+        );
+        ALTER TABLE Asset_Area ADD COLUMN IF NOT EXISTS bank_area REAL DEFAULT 0.0;
+
         CREATE TABLE IF NOT EXISTS Lease_Contracts (
             contract_id SERIAL PRIMARY KEY,
             asset_name TEXT,
@@ -952,42 +953,36 @@ def init_db():
             monthly_rent REAL,
             monthly_maintenance_fee REAL,
             total_rent_free_months INTEGER,
-            rent_free_details TEXT
-        )
-    """)
+            rent_free_details TEXT,
+            status TEXT DEFAULT 'ACTIVE',
+            deposit_return_date DATE,
+            penalty_yn TEXT,
+            penalty_amount REAL,
+            parent_contract_id INTEGER,
+            currency TEXT DEFAULT 'KRW',
+            floor_details TEXT,
+            escalation_cycle_years INTEGER,
+            rent_inc_rate REAL,
+            maint_inc_rate REAL,
+            contract_exclusive_area REAL,
+            rent_schedule TEXT,
+            remarks TEXT
+        );
+        ALTER TABLE Lease_Contracts
+            ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'ACTIVE',
+            ADD COLUMN IF NOT EXISTS deposit_return_date DATE,
+            ADD COLUMN IF NOT EXISTS penalty_yn TEXT,
+            ADD COLUMN IF NOT EXISTS penalty_amount REAL,
+            ADD COLUMN IF NOT EXISTS parent_contract_id INTEGER,
+            ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'KRW',
+            ADD COLUMN IF NOT EXISTS floor_details TEXT,
+            ADD COLUMN IF NOT EXISTS escalation_cycle_years INTEGER,
+            ADD COLUMN IF NOT EXISTS rent_inc_rate REAL,
+            ADD COLUMN IF NOT EXISTS maint_inc_rate REAL,
+            ADD COLUMN IF NOT EXISTS contract_exclusive_area REAL,
+            ADD COLUMN IF NOT EXISTS rent_schedule TEXT,
+            ADD COLUMN IF NOT EXISTS remarks TEXT;
 
-    # Alter Lease_Contracts to add new columns safely
-    new_columns = [
-        ("status", "TEXT DEFAULT 'ACTIVE'"),
-        ("deposit_return_date", "DATE"),
-        ("penalty_yn", "TEXT"),
-        ("penalty_amount", "REAL"),
-        ("parent_contract_id", "INTEGER"),
-        ("currency", "TEXT DEFAULT 'KRW'"),
-        ("floor_details", "TEXT"),
-        ("escalation_cycle_years", "INTEGER"),
-        ("rent_inc_rate", "REAL"),
-        ("maint_inc_rate", "REAL"),
-        ("contract_exclusive_area", "REAL"),
-        ("rent_schedule", "TEXT"),
-        ("remarks", "TEXT"),
-    ]
-    for col_name, col_type in new_columns:
-        try:
-            c.execute(f"ALTER TABLE Lease_Contracts ADD COLUMN {col_name} {col_type}")
-            if col_name == "status":
-                c.execute(
-                    "UPDATE Lease_Contracts SET status = 'ACTIVE' WHERE status IS NULL"
-                )
-            conn.commit()
-        except psycopg2.DatabaseError:
-            conn.rollback()
-            pass  # Column already exists
-
-    conn.commit()
-
-    # 주의: 과거에는 여기서 DROP TABLE을 실행해 앱 재시작 때마다 수동 조정값이 삭제되었습니다.
-    c.execute("""
         CREATE TABLE IF NOT EXISTS RentRoll_Overrides (
             contract_id INTEGER,
             floor TEXT,
@@ -996,10 +991,8 @@ def init_db():
             over_rent REAL,
             over_maint REAL,
             PRIMARY KEY (contract_id, floor, year, month)
-        )
-    """)
+        );
 
-    c.execute("""
         CREATE TABLE IF NOT EXISTS Contract_History (
             history_id SERIAL PRIMARY KEY,
             contract_id INTEGER,
@@ -1007,25 +1000,22 @@ def init_db():
             action_date DATE,
             action_month TEXT,
             details TEXT
-        )
-    """)
-    conn.commit()
-    return conn
+        );
+    """
+    raw = get_engine().raw_connection()
+    try:
+        cur = raw.cursor()
+        cur.execute(ddl)
+        cur.close()
+        raw.commit()
+    except Exception:
+        raw.rollback()
+    finally:
+        raw.close()
+    return True
 
 
 conn = init_db()
-
-
-@st.cache_resource
-def get_engine():
-    from sqlalchemy import create_engine
-
-    return create_engine(
-        st.secrets["DATABASE_URL"], pool_size=5, max_overflow=2, pool_recycle=300, pool_pre_ping=True
-    )
-
-
-engine = get_engine()
 
 
 @st.cache_data(ttl=600, show_spinner=False)

@@ -105,14 +105,27 @@ def extract_contract_info(uploaded_files) -> Optional[dict]:
                 })
 
         def call_gemini_with_fallback(inputs, generation_config):
-            model_flash = genai.GenerativeModel('gemini-2.5-flash')
-            model_lite = genai.GenerativeModel('gemini-3.5-flash-lite')
-            try:
-                return model_flash.generate_content(inputs, generation_config=generation_config)
-            except Exception as e:
-                if "429" in str(e) or "quota" in str(e).lower():
-                    return model_lite.generate_content(inputs, generation_config=generation_config)
-                raise e
+            candidate_models = [
+                "gemini-2.5-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-3.5-flash-lite",
+                "gemini-3.1-flash-lite",
+                "gemini-3.5-flash",
+                "gemini-3.8-flash",
+            ]
+            last_err = None
+            for m_name in candidate_models:
+                try:
+                    return genai.GenerativeModel(m_name).generate_content(
+                        inputs, generation_config=generation_config
+                    )
+                except Exception as e:
+                    last_err = e
+                    msg = str(e).lower()
+                    if any(k in msg for k in ("429", "quota", "resource_exhausted", "503", "unavailable", "overloaded", "404", "not found")):
+                        continue
+                    raise e
+            raise last_err
         
         prompt = """
         당신은 부동산 자산관리 전문가입니다. 주어진 계약서 문서를 주의 깊게 읽고, 다음의 임대차 계약 정보를 정확하게 추출해 주세요.

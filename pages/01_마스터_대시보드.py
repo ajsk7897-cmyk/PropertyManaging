@@ -129,31 +129,32 @@ else:
             st.markdown("#### 자산별 월별 임대료 수입 (당해)")
             if not active_leases.empty:
                 current_year = today_md.year
-                all_assets = active_leases["asset_name"].unique().tolist()
-                
-                # 월별 임대료 계산을 위해 전체 계약 데이터 로드
-                df_all_leases_md = fetch_data("SELECT * FROM Lease_Contracts")
-                
-                monthly_data = []
-                for month_num in range(1, 13):
-                    for asset in all_assets:
-                        asset_contracts = df_all_leases_md[df_all_leases_md["asset_name"] == asset]
-                        groups = asset_contracts[["floor", "company_name"]].drop_duplicates()
-                        total_rent = 0.0
-                        for _, g in groups.iterrows():
-                            r, _ = get_actual_monthly_rent_by_company(
-                                df_all_leases_md, asset, g["floor"], g["company_name"],
-                                current_year, month_num, ignore_rent_free=True
-                            )
-                            total_rent += r
-                        monthly_data.append({
-                            "월": f"{month_num}월",
-                            "월_정렬": month_num,
-                            "자산명": asset,
-                            "임대료": round(total_rent)
-                        })
-                
-                df_monthly = pd.DataFrame(monthly_data)
+                all_assets = tuple(sorted(active_leases["asset_name"].unique().tolist()))
+
+                @st.cache_data(ttl=600, show_spinner=False)
+                def _calc_dashboard_monthly_rent(year: int, assets_tuple: tuple):
+                    df_all_leases_md = fetch_data("SELECT * FROM Lease_Contracts")
+                    rows = []
+                    for month_num in range(1, 13):
+                        for asset in assets_tuple:
+                            asset_contracts = df_all_leases_md[df_all_leases_md["asset_name"] == asset]
+                            groups = asset_contracts[["floor", "company_name"]].drop_duplicates()
+                            total_rent = 0.0
+                            for _, g in groups.iterrows():
+                                r, _ = get_actual_monthly_rent_by_company(
+                                    df_all_leases_md, asset, g["floor"], g["company_name"],
+                                    year, month_num, ignore_rent_free=True
+                                )
+                                total_rent += r
+                            rows.append({
+                                "월": f"{month_num}월",
+                                "월_정렬": month_num,
+                                "자산명": asset,
+                                "임대료": round(total_rent)
+                            })
+                    return pd.DataFrame(rows)
+
+                df_monthly = _calc_dashboard_monthly_rent(current_year, all_assets)
                 if not df_monthly.empty and df_monthly["임대료"].sum() > 0:
                     df_monthly = df_monthly.sort_values("월_정렬")
                     fig_monthly = px.line(

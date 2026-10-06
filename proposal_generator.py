@@ -9,7 +9,7 @@ from copy import copy
 
 def py_to_sqm(py):
     if not py: return ""
-    return math.floor(float(py) * 3.3058 * 100) / 100
+    return math.floor(float(py) * 3.305785 * 100) / 100
 
 def py_to_sf(py):
     if not py: return ""

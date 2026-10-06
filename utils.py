@@ -415,7 +415,7 @@ def send_email_with_attachment(to_email, subject, body, file_bytes, file_name, m
 # Constants for currency conversion (should be updated via API in production)
 CURRENCY_RATES = {
     "USD_TO_KRW": 1400.0,  # TODO: Implement real-time exchange rate API
-    "PY_TO_SQM": 3.3058,
+    "PY_TO_SQM": 3.305785,
     "PY_TO_SF": 35.583
 }
 
@@ -1435,7 +1435,7 @@ def fetch_market_research_data():
             items = response.json().get("response", {}).get("body", {}).get("items", [])
             df = pd.DataFrame(items)
             if not df.empty and "㎡당 임대료" in df.columns:
-                df["평당 임대료"] = (df["㎡당 임대료"] * 3.3058).round().astype(int)
+                df["평당 임대료"] = (df["㎡당 임대료"] * 3.305785).round().astype(int)
             return df
         except Exception as e:
             st.error(f"한국부동산원 API 통신 중 오류가 발생했습니다: {e}")
